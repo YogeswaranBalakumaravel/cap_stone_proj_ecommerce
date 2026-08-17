@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+
+{% block title %}{{ phone.model_name }} &mdash; Flagship Phones Showcase{% endblock %}
+
+{% block content %}
+  <a class="back-link" href="{{ url_for('main.index') }}">&larr; Back to catalog</a>
+
+  <div class="detail-layout">
+    <div class="detail-image brand-{{ phone.brand|lower }}">
+      <img src="{{ url_for('static', filename=phone.image_url) }}" alt="{{ phone.model_name }}">
+    </div>
+
+    <div class="detail-info">
+      <span class="badge tier-badge">{{ phone.tier }}</span>
+      <h1>{{ phone.model_name }}</h1>
+      <p class="card-brand">{{ phone.brand }}</p>
+      <p class="detail-price">${{ '{:,.0f}'.format(phone.price_usd) }} <span class="starting-at">starting price</span></p>
+
+      <table class="spec-table">
+        <tbody>
+          <tr><th>Release date</th><td>{{ phone.release_date.strftime('%B %d, %Y') if phone.release_date else '—' }}</td></tr>
+          <tr><th>Screen size</th><td>{{ phone.screen_size_in }}&Prime;</td></tr>
+          <tr><th>Chip</th><td>{{ phone.chip }}</td></tr>
+          <tr><th>RAM</th><td>{{ phone.ram_gb }} GB</td></tr>
+          <tr><th>Storage options</th><td>{{ phone.storage_options_list|join(' GB, ') }} GB</td></tr>
+          <tr><th>Camera</th><td>{{ phone.camera_summary }}</td></tr>
+          <tr><th>Status</th><td>{{ 'Current flagship' if phone.is_current else 'Not currently sold' }}</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+{% endblock %}

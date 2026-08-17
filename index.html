@@ -1,0 +1,906 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>TechNest — Apple & Samsung Store</title>
+<style>
+  :root {
+    --bg: #0b0e14;
+    --surface: #131820;
+    --surface-2: #1a212c;
+    --border: #232b38;
+    --text: #eef2f7;
+    --muted: #9aa7b8;
+    --accent: #4f8cff;
+    --accent-2: #7c5cff;
+    --apple: #f5f5f7;
+    --samsung: #1a6feb;
+    --success: #34d399;
+    --danger: #f87171;
+    --radius: 16px;
+    --shadow: 0 12px 32px rgba(0, 0, 0, .45);
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: "Segoe UI", -apple-system, BlinkMacSystemFont, Roboto, Helvetica, Arial, sans-serif;
+    background: radial-gradient(1200px 600px at 80% -10%, #16233c 0%, transparent 60%),
+                radial-gradient(900px 500px at 0% 10%, #1a1233 0%, transparent 55%),
+                var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+    line-height: 1.5;
+  }
+
+  a { color: inherit; text-decoration: none; }
+  button { font-family: inherit; cursor: pointer; }
+
+  header {
+    position: sticky; top: 0; z-index: 50;
+    backdrop-filter: blur(14px);
+    background: rgba(11, 14, 20, .75);
+    border-bottom: 1px solid var(--border);
+  }
+
+  .nav {
+    max-width: 1280px; margin: 0 auto; padding: 14px 24px;
+    display: flex; align-items: center; gap: 18px;
+  }
+
+  .logo { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 20px; }
+  .logo-badge {
+    width: 34px; height: 34px; border-radius: 10px;
+    background: linear-gradient(135deg, var(--accent), var(--accent-2));
+    display: grid; place-items: center; font-size: 18px;
+  }
+
+  .nav-search {
+    flex: 1; max-width: 480px; margin: 0 auto; position: relative;
+  }
+  .nav-search input {
+    width: 100%; padding: 11px 16px 11px 42px;
+    border-radius: 999px; border: 1px solid var(--border);
+    background: var(--surface); color: var(--text); outline: none;
+    font-size: 14px; transition: border-color .2s;
+  }
+  .nav-search input:focus { border-color: var(--accent); }
+  .nav-search svg { position: absolute; left: 14px; top: 50%; transform: translateY(-50%); opacity: .5; }
+
+  .cart-btn {
+    position: relative; border: 1px solid var(--border);
+    background: var(--surface); color: var(--text);
+    padding: 10px 16px; border-radius: 999px; font-size: 14px; font-weight: 600;
+    display: flex; align-items: center; gap: 8px; transition: border-color .2s;
+  }
+  .cart-btn:hover { border-color: var(--accent); }
+  .cart-count {
+    position: absolute; top: -6px; right: -6px;
+    min-width: 20px; height: 20px; padding: 0 5px;
+    background: var(--danger); border-radius: 999px; font-size: 12px;
+    display: none; place-items: center; font-weight: 700;
+  }
+  .cart-count.show { display: grid; }
+
+  .hero {
+    max-width: 1280px; margin: 0 auto; padding: 56px 24px 28px; text-align: center;
+  }
+  .hero h1 { font-size: clamp(30px, 5vw, 48px); font-weight: 800; letter-spacing: -.5px; }
+  .hero h1 span { background: linear-gradient(90deg, var(--accent), var(--accent-2)); -webkit-background-clip: text; background-clip: text; color: transparent; }
+  .hero p { color: var(--muted); margin-top: 12px; font-size: 16px; }
+
+  .marquee {
+    max-width: 1280px; margin: 18px auto 0; padding: 10px 24px;
+    display: flex; gap: 10px; flex-wrap: wrap; justify-content: center;
+  }
+  .hip {
+    border: 1px solid var(--border); background: var(--surface);
+    border-radius: 999px; padding: 6px 14px; font-size: 13px; color: var(--muted);
+  }
+  .hip b { color: var(--text); }
+
+  .controls {
+    max-width: 1280px; margin: 28px auto 0; padding: 0 24px;
+    display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between;
+  }
+  .filter-group { display: flex; flex-wrap: wrap; gap: 8px; }
+  .chip {
+    border: 1px solid var(--border); background: var(--surface); color: var(--muted);
+    padding: 8px 16px; border-radius: 999px; font-size: 13px; font-weight: 600;
+    transition: all .18s;
+  }
+  .chip:hover { border-color: var(--accent); color: var(--text); }
+  .chip.active { background: linear-gradient(135deg, var(--accent), var(--accent-2)); border-color: transparent; color: #fff; }
+  .chip.brand-apple.active { background: var(--apple); color: #0b0e14; }
+  .chip.brand-samsung.active { background: var(--samsung); color: #fff; }
+
+  .sort-select {
+    border: 1px solid var(--border); background: var(--surface); color: var(--text);
+    padding: 8px 14px; border-radius: 999px; font-size: 13px; outline: none;
+  }
+
+  .grid {
+    max-width: 1280px; margin: 24px auto 80px; padding: 0 24px;
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 20px;
+  }
+
+  .card {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--radius); overflow: hidden; transition: transform .2s, border-color .2s, box-shadow .2s;
+    display: flex; flex-direction: column;
+  }
+  .card:hover { transform: translateY(-4px); border-color: var(--accent); box-shadow: var(--shadow); }
+
+  .card-media {
+    height: 180px; position: relative; display: grid; place-items: center;
+    background: var(--surface-2);
+  }
+  .card-media.apple { background: linear-gradient(160deg, #2a2f3a, #171b23); }
+  .card-media.samsung { background: linear-gradient(160deg, #0e2138, #101623); }
+  .badge {
+    position: absolute; top: 12px; left: 12px; z-index: 2;
+    background: rgba(0, 0, 0, .55); color: var(--text);
+    border: 1px solid var(--border); padding: 4px 10px; border-radius: 999px; font-size: 11px; font-weight: 600;
+    backdrop-filter: blur(4px);
+  }
+  .tag-new { background: linear-gradient(135deg, #16a34a, #22c55e); border: none; color: #05090670; color: #052e16; }
+  .tag-deal { background: linear-gradient(135deg, #f97316, #ef4444); border: none; color: #fff; }
+
+  .card-body { padding: 16px 18px 18px; display: flex; flex-direction: column; gap: 8px; flex: 1; }
+  .card-brand { font-size: 11px; text-transform: uppercase; letter-spacing: 1.5px; font-weight: 700; }
+  .card-brand.apple { color: #8ea0c4; }
+  .card-brand.samsung { color: #6fa8f0; }
+  .card-name { font-size: 16px; font-weight: 700; }
+  .card-spec { color: var(--muted); font-size: 13px; }
+  .card-footer { margin-top: auto; display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+  .price-wrap { display: flex; flex-direction: column; }
+  .price { font-size: 20px; font-weight: 800; }
+  .price-old { font-size: 13px; color: var(--muted); text-decoration: line-through; }
+
+  .add-btn {
+    border: none; border-radius: 12px; padding: 10px 16px; font-weight: 700; font-size: 13px;
+    color: #fff; background: linear-gradient(135deg, var(--accent), var(--accent-2));
+    display: flex; align-items: center; gap: 6px; transition: filter .18s, transform .1s;
+  }
+  .add-btn:hover { filter: brightness(1.12); }
+  .add-btn:active { transform: scale(.96); }
+
+  .empty {
+    grid-column: 1 / -1; text-align: center; padding: 60px 20px; color: var(--muted);
+    border: 1px dashed var(--border); border-radius: var(--radius);
+  }
+
+  /* Cart drawer */
+  .overlay {
+    position: fixed; inset: 0; background: rgba(0, 0, 0, .6);
+    opacity: 0; pointer-events: none; transition: opacity .25s; z-index: 90;
+  }
+  .overlay.show { opacity: 1; pointer-events: auto; }
+
+  .drawer, .modal {
+    position: fixed; top: 0; right: 0; height: 100%; width: min(420px, 100%);
+    background: var(--surface); border-left: 1px solid var(--border);
+    transform: translateX(105%); transition: transform .3s ease; z-index: 100;
+    display: flex; flex-direction: column;
+  }
+  .drawer.show { transform: translateX(0); }
+  .drawer-head, .modal-head {
+    padding: 20px 22px; border-bottom: 1px solid var(--border);
+    display: flex; justify-content: space-between; align-items: center;
+  }
+  .drawer-head h2, .modal-head h2 { font-size: 18px; }
+  .close-btn {
+    background: none; border: none; color: var(--muted); font-size: 24px; line-height: 1;
+  }
+  .close-btn:hover { color: var(--text); }
+
+  .drawer-body { flex: 1; overflow-y: auto; padding: 16px 22px; display: flex; flex-direction: column; gap: 14px; }
+
+  .cart-item {
+    display: flex; gap: 14px; border: 1px solid var(--border);
+    border-radius: 12px; padding: 12px; background: var(--surface-2);
+  }
+  .cart-item-thumb {
+    width: 56px; height: 56px; border-radius: 10px; background: var(--surface);
+    display: grid; place-items: center; flex-shrink: 0; font-size: 26px;
+  }
+  .cart-item-info { flex: 1; min-width: 0; }
+  .cart-item-name { font-size: 13px; font-weight: 600; }
+  .cart-item-spec { color: var(--muted); font-size: 12px; }
+  .cart-item-price { font-size: 13px; font-weight: 700; margin-top: 4px; }
+  .cart-item-actions { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
+  .qty-btn {
+    width: 26px; height: 26px; border-radius: 8px; border: 1px solid var(--border);
+    background: var(--surface); color: var(--text); font-size: 14px; font-weight: 700;
+    display: grid; place-items: center;
+  }
+  .qty-btn:hover { border-color: var(--accent); }
+  .cart-item-qty { font-size: 14px; font-weight: 700; min-width: 18px; text-align: center; }
+  .remove-btn {
+    margin-left: auto; background: none; border: none; color: var(--danger); font-size: 13px;
+  }
+
+  .drawer-foot { padding: 18px 22px 22px; border-top: 1px solid var(--border); }
+  .total-row { display: flex; justify-content: space-between; margin-bottom: 6px; color: var(--muted); font-size: 14px; }
+  .total-row strong { color: var(--text); }
+  .grand { font-size: 16px; font-weight: 800; color: var(--text); }
+  .checkout-btn {
+    margin-top: 14px; width: 100%; padding: 14px; border: none; border-radius: 12px;
+    background: linear-gradient(135deg, var(--success), #22c55e); color: #052e16;
+    font-size: 15px; font-weight: 800;
+  }
+  .empty-cart { text-align: center; color: var(--muted); padding: 40px 0; }
+
+  /* Checkout modal */
+  .modal {
+    left: 50%; right: auto; top: 50%; bottom: auto; height: auto;
+    transform: translate(-50%, -46%) scale(.96); width: min(520px, 92%);
+    border-radius: var(--radius); border: 1px solid var(--border);
+    opacity: 0; pointer-events: none; transition: all .28s ease;
+    max-height: 90vh; overflow-y: auto;
+  }
+  .modal.show { transform: translate(-50%, -50%) scale(1); opacity: 1; pointer-events: auto; }
+
+  .form { padding: 20px 22px; display: flex; flex-direction: column; gap: 14px; }
+  .field label { display: block; font-size: 12px; font-weight: 600; color: var(--muted); margin-bottom: 6px; }
+  .field input {
+    width: 100%; padding: 11px 14px; border-radius: 10px; border: 1px solid var(--border);
+    background: var(--surface-2); color: var(--text); outline: none; font-size: 14px;
+  }
+  .field input:focus { border-color: var(--accent); }
+  .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .order-summary {
+    background: var(--surface-2); border: 1px solid var(--border);
+    padding: 14px; border-radius: 12px; font-size: 13px; color: var(--muted);
+    display: flex; flex-direction: column; gap: 6px;
+  }
+  .order-summary .total-line { display: flex; justify-content: space-between; }
+  .order-summary .total-line.last { color: var(--text); font-weight: 800; font-size: 15px; }
+  .place-btn {
+    width: 100%; padding: 14px; border: none; border-radius: 12px; font-size: 15px; font-weight: 800;
+    background: linear-gradient(135deg, var(--accent), var(--accent-2)); color: #fff;
+  }
+
+  /* Toast */
+  .toast {
+    position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%) translateY(80px);
+    background: #0f1720; border: 1px solid var(--border); color: var(--text);
+    padding: 12px 20px; border-radius: 999px; font-size: 14px; font-weight: 600;
+    box-shadow: var(--shadow); transition: transform .3s ease; z-index: 200;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .toast.show { transform: translateX(-50%) translateY(0); }
+  .toast .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--success); }
+
+  /* Chat bot */
+  .chat-launcher {
+    position: fixed; right: 20px; bottom: 20px; z-index: 160;
+    width: 60px; height: 60px; border-radius: 50%; border: none;
+    background: linear-gradient(135deg, var(--accent), var(--accent-2));
+    color: #fff; font-size: 26px; box-shadow: var(--shadow);
+    display: grid; place-items: center; transition: transform .2s;
+  }
+  .chat-launcher:hover { transform: scale(1.08); }
+
+  .chat-window {
+    position: fixed; right: 20px; bottom: 92px; z-index: 165;
+    width: min(360px, calc(100vw - 40px)); height: min(480px, calc(100vh - 120px));
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--radius); box-shadow: var(--shadow);
+    display: flex; flex-direction: column; overflow: hidden;
+    opacity: 0; pointer-events: none; transform: translateY(16px) scale(.97);
+    transform-origin: bottom right; transition: all .25s ease;
+  }
+  .chat-window.show { opacity: 1; pointer-events: auto; transform: none; }
+
+  .chat-head {
+    padding: 14px 18px; display: flex; align-items: center; gap: 12px;
+    background: linear-gradient(135deg, var(--accent), var(--accent-2));
+  }
+  .chat-avatar {
+    width: 38px; height: 38px; border-radius: 50%; background: rgba(255, 255, 255, .18);
+    display: grid; place-items: center; font-size: 20px; flex-shrink: 0;
+  }
+  .chat-head-info { flex: 1; }
+  .chat-head-info b { display: block; font-size: 15px; }
+  .chat-head-info span { font-size: 12px; opacity: .85; }
+  .chat-close { background: none; border: none; color: #fff; font-size: 22px; line-height: 1; }
+
+  .chat-body { flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 10px; }
+  .msg { max-width: 82%; padding: 9px 13px; border-radius: 14px; font-size: 13px; line-height: 1.45; white-space: pre-wrap; }
+  .msg.bot {
+    align-self: flex-start; background: var(--surface-2); border: 1px solid var(--border);
+    border-bottom-left-radius: 4px;
+  }
+  .msg.user {
+    align-self: flex-end; background: linear-gradient(135deg, var(--accent), var(--accent-2));
+    color: #fff; border-bottom-right-radius: 4px;
+  }
+  .chat-quick { display: flex; flex-wrap: wrap; gap: 6px; padding: 0 16px 10px; }
+  .quick-chip {
+    border: 1px solid var(--border); background: var(--surface-2); color: var(--text);
+    padding: 5px 10px; border-radius: 999px; font-size: 12px;
+  }
+  .quick-chip:hover { border-color: var(--accent); }
+  .chat-input-wrap { display: flex; gap: 8px; padding: 12px; border-top: 1px solid var(--border); }
+  .chat-input {
+    flex: 1; padding: 10px 14px; border-radius: 999px; border: 1px solid var(--border);
+    background: var(--surface-2); color: var(--text); outline: none; font-size: 13px;
+  }
+  .chat-input:focus { border-color: var(--accent); }
+  .chat-send {
+    width: 42px; height: 42px; border-radius: 50%; border: none; flex-shrink: 0;
+    background: linear-gradient(135deg, var(--accent), var(--accent-2)); color: #fff;
+    display: grid; place-items: center;
+  }
+  .typing { color: var(--muted); font-size: 12px; padding: 4px 6px; align-self: flex-start; }
+  .typing::after {
+    content: ""; display: inline-block; width: 8px;
+    animation: typingDots 1.2s steps(4, end) infinite;
+  }
+  @keyframes typingDots { 0% { content: ""; } 25% { content: "."; } 50% { content: ".."; } 75% { content: "..."; } 100% { content: ""; } }
+
+  footer {
+    border-top: 1px solid var(--border); padding: 24px;
+    text-align: center; color: var(--muted); font-size: 13px;
+  }
+
+  @media (max-width: 640px) {
+    .nav-search { order: 3; max-width: none; width: 100%; }
+    .grid { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="nav">
+    <div class="logo"><span class="logo-badge">T</span> TechNest</div>
+    <div class="nav-search">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
+      <input id="search" type="text" placeholder="Search phones, tablets, laptops, watches, audio..." autocomplete="off" />
+    </div>
+    <button class="cart-btn" id="cartBtn">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="9" cy="21" r="1.6"/><circle cx="19" cy="21" r="1.6"/><path d="M2 3h3l2.6 12.5a2 2 0 0 0 2 1.5h9.7a2 2 0 0 0 2-1.6L23 7H6"/></svg>
+      Cart
+      <span class="cart-count" id="cartCount">0</span>
+    </button>
+    <a class="cart-btn" href="tws.html" title="TWS earbuds">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7l9-4 9 4M3 7l9 4 9-4M12 11v10"/></svg>
+      TWS
+    </a>
+  </div>
+</header>
+
+<section class="hero">
+  <h1>Premium <span>Apple</span> &amp; <span>Samsung</span> devices.</h1>
+  <p>The latest flagship iPhones and Galaxy devices at current market prices. Updated August 2026.</p>
+  <div class="marquee">
+    <span class="hip">🚀 New: <b>iPhone 17 series</b></span>
+    <span class="hip">🤖 New: <b>Galaxy S26 series</b></span>
+    <span class="hip">📦 Free shipping</span>
+    <span class="hip">↩️ 30-day returns</span>
+    <span class="hip">🛡️ 1-year warranty</span>
+  </div>
+</section>
+
+<section class="controls">
+  <div class="filter-group" id="brandFilters">
+    <button class="chip active" data-brand="all">All Brands</button>
+    <button class="chip brand-apple" data-brand="apple">Apple</button>
+    <button class="chip brand-samsung" data-brand="samsung">Samsung</button>
+  </div>
+  <div class="filter-group" id="categoryFilters">
+    <button class="chip active" data-cat="all">All</button>
+    <button class="chip" data-cat="Phone">Phones</button>
+    <button class="chip" data-cat="Tablet">Tablets</button>
+    <button class="chip" data-cat="Laptop">Laptops</button>
+    <button class="chip" data-cat="Watch">Watches</button>
+    <button class="chip" data-cat="Audio">Audio</button>
+  </div>
+  <select class="sort-select" id="sort">
+    <option value="featured">Sort: Featured</option>
+    <option value="price-asc">Price: Low to High</option>
+    <option value="price-desc">Price: High to Low</option>
+    <option value="newest">Newest</option>
+  </select>
+</section>
+
+<main class="grid" id="grid"></main>
+
+<footer>
+  TechNest — Demo single-page store. Prices from official Apple &amp; Samsung US online stores, August 2026. For educational use only.
+</footer>
+
+<div class="overlay" id="overlay"></div>
+
+<!-- Cart drawer -->
+<aside class="drawer" id="drawer">
+  <div class="drawer-head">
+    <h2>Shopping Cart</h2>
+    <button class="close-btn" data-close>&times;</button>
+  </div>
+  <div class="drawer-body" id="cartItems"></div>
+  <div class="drawer-foot">
+    <div class="total-row"><span>Subtotal</span><strong id="subtotal">$0</strong></div>
+    <div class="total-row"><span>Shipping</span><strong>Free</strong></div>
+    <div class="total-row"><span>Tax (estimated 8%)</span><strong id="tax">$0</strong></div>
+    <div class="total-row grand"><span>Total</span><strong id="total">$0</strong></div>
+    <button class="checkout-btn" id="checkoutBtn">Proceed to Checkout</button>
+  </div>
+</aside>
+
+<!-- Checkout modal -->
+<div class="modal" id="modal">
+  <div class="modal-head">
+    <h2>Checkout</h2>
+    <button class="close-btn" data-close>&times;</button>
+  </div>
+  <form class="form" id="checkoutForm">
+    <div class="order-summary" id="orderSummary"></div>
+    <div class="field">
+      <label>Full Name</label>
+      <input type="text" required placeholder="Alex Smith" />
+    </div>
+    <div class="field">
+      <label>Email</label>
+      <input type="email" required placeholder="alex@example.com" />
+    </div>
+    <div class="field">
+      <label>Shipping Address</label>
+      <input type="text" required placeholder="123 Market Street, San Francisco, CA" />
+    </div>
+    <div class="row2">
+      <div class="field">
+        <label>Card Number</label>
+        <input type="text" inputmode="numeric" required maxlength="19" placeholder="4242 4242 4242 4242" />
+      </div>
+      <div class="field">
+        <label>CVV</label>
+        <input type="password" inputmode="numeric" required maxlength="4" placeholder="•••" />
+      </div>
+    </div>
+    <button type="submit" class="place-btn">Pay Now</button>
+  </form>
+</div>
+
+<div class="toast" id="toast"><span class="dot"></span><span id="toastMsg">Added to cart</span></div>
+
+<!-- Chat bot -->
+<button class="chat-launcher" id="chatLauncher" title="Chat with us">💬</button>
+
+<div class="chat-window" id="chatWindow">
+  <div class="chat-head">
+    <div class="chat-avatar">🤖</div>
+    <div class="chat-head-info">
+      <b>TechNest Assistant</b>
+      <span>Online · replies instantly</span>
+    </div>
+    <button class="chat-close" id="chatClose">&times;</button>
+  </div>
+  <div class="chat-body" id="chatBody"></div>
+  <div class="chat-quick" id="chatQuick"></div>
+  <div class="chat-input-wrap">
+    <input class="chat-input" id="chatInput" type="text" placeholder="Type a message..." autocomplete="off" />
+    <button class="chat-send" id="chatSend" title="Send">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M22 2L11 13"/><path d="M22 2l-7 20-4-9-9-4z"/></svg>
+    </button>
+  </div>
+</div>
+
+<script>
+/* ---------------- Catalog: latest prices (Aug 2026) ---------------- */
+const PRODUCTS = [
+  // ---------- Apple ----------
+  { id: 1,  brand: "apple", model: "Play", emoji: "📱", cat: "Phone",
+    name: "iPhone 17e", spec: "6.1\" · A19 chip · 128GB · 5G", color: "#5f6b7f",
+    price: 599, tag: "new" },
+  { id: 2,  brand: "apple", model: "Play Pro", emoji: "📱", cat: "Phone",
+    name: "iPhone 17", spec: "6.3\" OLED · A19 Pro · 256GB", color: "#c65f8f",
+    price: 829, tag: "new", old: 899 },
+  { id: 3,  brand: "apple", model: "Book", emoji: "📱", cat: "Phone",
+    name: "iPhone Air", spec: "6.5\" · Ultrathin titanium · 256GB", color: "#8f63c6",
+    price: 999, tag: "new" },
+  { id: 4,  brand: "apple", model: "Arch", emoji: "📱", cat: "Phone",
+    name: "iPhone 17 Pro", spec: "6.4\" ProMotion · 48MP · 256GB", color: "#4f7dd1",
+    price: 1099, tag: "new" },
+  { id: 5,  brand: "apple", model: "Book Pro", emoji: "📱", cat: "Phone",
+    name: "iPhone 17 Pro Max", spec: "6.9\" · 6x zoom · Titanium · 256GB", color: "#3b6ed0",
+    price: 1199, tag: "new" },
+
+  { id: 6,  brand: "samsung", model: "Play", emoji: "🤖", cat: "Phone",
+    name: "Galaxy S25 FE", spec: "6.3\" AMOLED · Galaxy AI · 128GB", color: "#3f8ce8",
+    price: 649, tag: "deal", old: 709 },
+  { id: 7,  brand: "samsung", model: "Book Pro", emoji: "🤖", cat: "Phone",
+    name: "Galaxy S26", spec: "6.3\" QHD+ · Snapdragon 8 Elite · 256GB", color: "#5f8f3f",
+    price: 899, tag: "new" },
+  { id: 8,  brand: "samsung", model: "Book Pro", emoji: "🤖", cat: "Phone",
+    name: "Galaxy S26+", spec: "6.7\" QHD+ · 50MP · 256GB", color: "#3f8fd8",
+    price: 1099, tag: "new" },
+  { id: 9,  brand: "samsung", model: "Arch", emoji: "🤖", cat: "Phone",
+    name: "Galaxy S26 Ultra", spec: "6.9\" · 200MP · Privacy Display · 512GB", color: "#2f68b8",
+    price: 1299, tag: "new" },
+  { id: 10, brand: "samsung", model: "Play", emoji: "🤖", cat: "Phone",
+    name: "Galaxy Z Flip 7", spec: "6.7\" foldable · FlexWindow · 256GB", color: "#c68f3f",
+    price: 1099, tag: "new" },
+  { id: 11, brand: "samsung", model: "Book", emoji: "🤖", cat: "Phone",
+    name: "Galaxy Z Fold 7", spec: "8.1\" tablet-fold · S Pen · 512GB", color: "#5f5f8f",
+    price: 2199, tag: "new" },
+  { id: 12, brand: "samsung", model: "Book", emoji: "🤖", cat: "Phone",
+    name: "Galaxy S25 Edge", spec: "6.7\" ultra-slim · 512GB", color: "#bf5f8f",
+    price: 1299, tag: "new" },
+
+  // ---------- Tablets ----------
+  { id: 13, brand: "apple", model: "Book", emoji: "📱", cat: "Tablet",
+    name: "iPad (A16)", spec: "11\" Liquid Retina · 128GB", color: "#5f5f5f",
+    price: 349, tag: "deal", old: 399 },
+  { id: 14, brand: "apple", model: "Arch", emoji: "📱", cat: "Tablet",
+    name: "iPad mini 7", spec: "8.3\" · A17 Pro · 128GB", color: "#8f8f5f",
+    price: 499 },
+  { id: 15, brand: "apple", model: "Book Pro", emoji: "📱", cat: "Tablet",
+    name: "iPad Air M4", spec: "11\" · M4 · Nano-texture · 128GB", color: "#4f8f8f",
+    price: 599, tag: "new" },
+  { id: 16, brand: "apple", model: "Arch", emoji: "📱", cat: "Tablet",
+    name: "iPad Pro M5", spec: "13\" Ultra Retina XDR · 256GB", color: "#8f8f8f",
+    price: 1299, tag: "new" },
+
+  { id: 17, brand: "samsung", model: "Play", emoji: "🤖", cat: "Tablet",
+    name: "Galaxy Tab S11", spec: "11\" AMOLED · 120Hz · 256GB", color: "#3f7f5f",
+    price: 749, tag: "deal", old: 899 },
+  { id: 18, brand: "samsung", model: "Book Pro", emoji: "🤖", cat: "Tablet",
+    name: "Galaxy Tab S11 Ultra", spec: "14.6\" AMOLED · 256GB · S Pen", color: "#5f3f7f",
+    price: 1299, tag: "new" },
+  { id: 19, brand: "samsung", model: "Book", emoji: "🤖", cat: "Tablet",
+    name: "Galaxy Tab S11 Ultra 1TB", spec: "14.6\" · 1TB · 5G · Wi-Fi", color: "#3f5f7f",
+    price: 1899 },
+
+  // ---------- Laptops ----------
+  { id: 20, brand: "apple", model: "Book", emoji: "💻", cat: "Laptop",
+    name: "MacBook Air M5", spec: "13.6\" · 16/512GB · Midnight", color: "#5f9fbf",
+    price: 1099, tag: "new" },
+  { id: 21, brand: "apple", model: "Book Pro", emoji: "💻", cat: "Laptop",
+    name: "MacBook Pro 14 M5", spec: "14\" · M5 · 16/1TB · Space Black", color: "#2b2f38",
+    price: 1699, tag: "new" },
+
+  // ---------- Watches ----------
+  { id: 22, brand: "apple", model: "Arch", emoji: "⌚", cat: "Watch",
+    name: "Apple Watch SE 3", spec: "40mm Aluminium · GPS", color: "#5f8fbf",
+    price: 249 },
+  { id: 23, brand: "apple", model: "Arch", emoji: "⌚", cat: "Watch",
+    name: "Apple Watch Series 11", spec: "42mm Aluminium · GPS · S27", color: "#bf5f6f",
+    price: 399, tag: "new" },
+  { id: 24, brand: "apple", model: "Arch", emoji: "⌚", cat: "Watch",
+    name: "Apple Watch Ultra 3", spec: "49mm Titanium · 5G GPS · S27", color: "#d88f3f",
+    price: 799, tag: "new" },
+
+  { id: 25, brand: "samsung", model: "Arch", emoji: "⌚", cat: "Watch",
+    name: "Galaxy Watch Ultra 2", spec: "47mm Titanium · LTE · AI Health", color: "#2f7fa8",
+    price: 649, tag: "new" },
+
+  // ---------- Audio ----------
+  { id: 26, brand: "apple", model: "Play", emoji: "🎧", cat: "Audio",
+    name: "AirPods 4", spec: "Open-ear · H2 · USB-C", color: "#8f9bf0",
+    price: 129 },
+  { id: 27, brand: "apple", model: "Play Pro", emoji: "🎧", cat: "Audio",
+    name: "AirPods Pro 3", spec: "Active ANC · H3 · Hearing aid mode", color: "#6f7fe0",
+    price: 249, tag: "new" },
+  { id: 28, brand: "apple", model: "Play Pro", emoji: "🎧", cat: "Audio",
+    name: "AirPods Max 2", spec: "Over-ear · H2 · USB-C · 5 colors", color: "#5060b8",
+    price: 549, tag: "new" },
+
+  { id: 29, brand: "samsung", model: "Play", emoji: "🎧", cat: "Audio",
+    name: "Galaxy Buds 4", spec: "Open-type · Ghost Call ANC", color: "#6f8f5f",
+    price: 149, tag: "new" },
+  { id: 30, brand: "samsung", model: "Play Pro", emoji: "🎧", cat: "Audio",
+    name: "Galaxy Buds 4 Pro", spec: "Hi-Fi sound · Dual codec · ANC", color: "#8f6f3f",
+    price: 249, tag: "new" },
+];
+
+const EMOJI_BY_CAT = { "Phone": "📱", "Tablet": "📱", "Laptop": "💻", "Watch": "⌚", "Audio": "🎧" };
+
+let cart = {};            // id -> qty
+let brandFilter = "all";
+let catFilter = "all";
+let query = "";
+let sortMode = "featured";
+
+const grid = document.getElementById("grid");
+const cartBtn = document.getElementById("cartBtn");
+const cartCount = document.getElementById("cartCount");
+const drawer = document.getElementById("drawer");
+const overlay = document.getElementById("overlay");
+const cartItemsEl = document.getElementById("cartItems");
+const subtotalEl = document.getElementById("subtotal");
+const taxEl = document.getElementById("tax");
+const totalEl = document.getElementById("total");
+const modal = document.getElementById("modal");
+const orderSummary = document.getElementById("orderSummary");
+const toast = document.getElementById("toast");
+const toastMsg = document.getElementById("toastMsg");
+
+/* ---------------- Rendering ---------------- */
+function filtered() {
+  let list = PRODUCTS.filter(p =>
+    (brandFilter === "all" || p.brand === brandFilter) &&
+    (catFilter === "all" || p.cat === catFilter) &&
+    (!query || p.name.toLowerCase().includes(query) || p.spec.toLowerCase().includes(query))
+  );
+  if (sortMode === "price-asc") list.sort((a, b) => a.price - b.price);
+  if (sortMode === "price-desc") list.sort((a, b) => b.price - a.price);
+  if (sortMode === "newest") list.sort((a, b) => (b.tag === "new") - (a.tag === "new"));
+  return list;
+}
+
+function renderGrid() {
+  const list = filtered();
+  if (!list.length) {
+    grid.innerHTML = `<div class="empty">No products match your search. Try a different filter.</div>`;
+    return;
+  }
+  grid.innerHTML = list.map(p => {
+    const tagHtml = p.tag === "new" ? `<span class="badge tag-new">NEW</span>`
+                   : p.tag === "deal" ? `<span class="badge tag-deal">DEAL</span>` : "";
+    const emoji = p.cat === "Phone" ? (p.brand === "apple" ? "📱" : "🤖") : EMOJI_BY_CAT[p.cat];
+    const oldHtml = p.old ? `<span class="price-old">$${p.old}</span>` : "";
+    return `
+      <article class="card">
+        <div class="card-media ${p.brand}">
+          ${tagHtml}
+          <span style="font-size:58px;filter:drop-shadow(0 8px 12px rgba(0,0,0,.4))">${emoji}</span>
+          <span class="badge" style="right:12px;left:auto">${p.brand === "apple" ? "Apple" : "Samsung"}</span>
+        </div>
+        <div class="card-body">
+          <span class="card-brand ${p.brand}">${p.brand === "apple" ? "Apple" : "Samsung"}</span>
+          <h3 class="card-name">${p.name}</h3>
+          <p class="card-spec">${p.spec}</p>
+          <div class="card-footer">
+            <div class="price-wrap">
+              <span class="price">$${p.price}</span>
+              ${oldHtml}
+            </div>
+            <button class="add-btn" data-id="${p.id}">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 5v14M5 12h14"/></svg>
+              Add
+            </button>
+          </div>
+        </div>
+      </article>`;
+  }).join("");
+}
+
+function renderCart() {
+  const ids = Object.keys(cart);
+  const items = ids.map(id => PRODUCTS.find(p => p.id === +id)).filter(Boolean);
+  const count = items.reduce((s, p) => s + cart[p.id], 0);
+  cartCount.textContent = count;
+  cartCount.classList.toggle("show", count > 0);
+
+  if (!items.length) {
+    cartItemsEl.innerHTML = `<div class="empty-cart">🛒 Your cart is empty.<br><br>Add some devices to get started.</div>`;
+    subtotalEl.textContent = taxEl.textContent = totalEl.textContent = "$0";
+    return;
+  }
+
+  cartItemsEl.innerHTML = items.map(p => `
+    <div class="cart-item">
+      <div class="cart-item-thumb" style="background:${p.brand === "apple" ? "#242b3a" : "#0f2133"}">${p.brand === "apple" ? "📱" : "🤖"}</div>
+      <div class="cart-item-info">
+        <div class="cart-item-name">${p.name}</div>
+        <div class="cart-item-spec">${p.spec}</div>
+        <div class="cart-item-price">$${p.price}</div>
+        <div class="cart-item-actions">
+          <button class="qty-btn" data-id="${p.id}" data-op="minus">−</button>
+          <span class="cart-item-qty">${cart[p.id]}</span>
+          <button class="qty-btn" data-id="${p.id}" data-op="plus">+</button>
+          <button class="remove-btn" data-id="${p.id}" data-op="remove">Remove</button>
+        </div>
+      </div>
+    </div>`).join("");
+
+  const sub = items.reduce((s, p) => s + p.price * cart[p.id], 0);
+  const tax = sub * 0.08;
+  subtotalEl.textContent = "$" + sub.toFixed(2);
+  taxEl.textContent = "$" + tax.toFixed(2);
+  totalEl.textContent = "$" + (sub + tax).toFixed(2);
+}
+
+/* ---------------- Actions ---------------- */
+function addToCart(id) {
+  cart[id] = (cart[id] || 0) + 1;
+  renderCart();
+  const p = PRODUCTS.find(x => x.id === id);
+  showToast(`${p ? p.name : "Item"} added to cart`);
+}
+
+function showToast(msg) {
+  toastMsg.textContent = msg;
+  toast.classList.add("show");
+  clearTimeout(showToast._t);
+  showToast._t = setTimeout(() => toast.classList.remove("show"), 2200);
+}
+
+function openDrawer() { drawer.classList.add("show"); overlay.classList.add("show"); }
+function closeDrawer() { drawer.classList.remove("show"); overlay.classList.remove("show"); closeModal(); }
+function openModal() { renderOrderSummary(); modal.classList.add("show"); overlay.classList.add("show"); }
+function closeModal() { modal.classList.remove("show"); if (!drawer.classList.contains("show")) overlay.classList.remove("show"); }
+
+function renderOrderSummary() {
+  const items = Object.keys(cart).map(id => PRODUCTS.find(p => p.id === +id)).filter(Boolean);
+  const sub = items.reduce((s, p) => s + p.price * cart[p.id], 0);
+  const tax = sub * 0.08;
+  const lines = items.map(p =>
+    `<div class="total-line"><span>${p.name} × ${cart[p.id]}</span><span>$${(p.price * cart[p.id]).toFixed(2)}</span></div>`
+  ).join("");
+  orderSummary.innerHTML = lines +
+    `<div class="total-line"><span>Subtotal</span><span>$${sub.toFixed(2)}</span></div>
+     <div class="total-line"><span>Shipping</span><span>Free</span></div>
+     <div class="total-line last"><span>Total</span><span>$${(sub + tax).toFixed(2)}</span></div>`;
+}
+
+/* ---------------- Events ---------------- */
+document.getElementById("brandFilters").addEventListener("click", e => {
+  const chip = e.target.closest("[data-brand]");
+  if (!chip) return;
+  brandFilter = chip.dataset.brand;
+  document.querySelectorAll("#brandFilters .chip").forEach(c => c.classList.toggle("active", c === chip));
+  renderGrid();
+});
+
+document.getElementById("categoryFilters").addEventListener("click", e => {
+  const chip = e.target.closest("[data-cat]");
+  if (!chip) return;
+  catFilter = chip.dataset.cat;
+  document.querySelectorAll("#categoryFilters .chip").forEach(c => c.classList.toggle("active", c === chip));
+  renderGrid();
+});
+
+document.getElementById("sort").addEventListener("change", e => {
+  sortMode = e.target.value;
+  renderGrid();
+});
+
+document.getElementById("search").addEventListener("input", e => {
+  query = e.target.value.trim().toLowerCase();
+  renderGrid();
+});
+
+grid.addEventListener("click", e => {
+  const btn = e.target.closest(".add-btn");
+  if (btn) addToCart(+btn.dataset.id);
+});
+
+cartBtn.addEventListener("click", openDrawer);
+
+cartItemsEl.addEventListener("click", e => {
+  const btn = e.target.closest("[data-op]");
+  if (!btn) return;
+  const id = +btn.dataset.id;
+  const op = btn.dataset.op;
+  if (op === "plus") cart[id]++;
+  else if (op === "minus") { cart[id]--; if (cart[id] <= 0) delete cart[id]; }
+  else delete cart[id];
+  renderCart();
+});
+
+document.querySelectorAll("[data-close]").forEach(b => b.addEventListener("click", closeDrawer));
+
+overlay.addEventListener("click", closeDrawer);
+
+document.getElementById("checkoutBtn").addEventListener("click", () => {
+  if (!Object.keys(cart).length) { showToast("Your cart is empty"); return; }
+  closeModal();
+  requestAnimationFrame(() => openModal());
+});
+
+document.getElementById("checkoutForm").addEventListener("submit", e => {
+  e.preventDefault();
+  showToast("Order placed successfully 🎉");
+  cart = {};
+  document.getElementById("checkoutForm").reset();
+  renderCart();
+  renderGrid();
+  closeModal();
+  closeDrawer();
+});
+
+/* ---------------- Chat bot ---------------- */
+const chatLauncher = document.getElementById("chatLauncher");
+const chatWindow = document.getElementById("chatWindow");
+const chatClose = document.getElementById("chatClose");
+const chatBody = document.getElementById("chatBody");
+const chatQuick = document.getElementById("chatQuick");
+const chatInput = document.getElementById("chatInput");
+const chatSend = document.getElementById("chatSend");
+
+const QUICK_CHIPS = ["Hi 👋", "Latest iPhones", "Samsung deals", "Prices", "Free shipping", "Warranty"];
+
+function botReply(text) {
+  const t = text.toLowerCase();
+  if (/\b(hi|hello|hey|good (morning|afternoon|evening))\b/.test(t))
+    return "Hello! 👋 Welcome to TechNest. I can help you find the latest Apple & Samsung devices, prices, and deals. What are you looking for today?";
+  if (/(iphone|apple)/.test(t) && /(new|latest|best|17)/.test(t))
+    return "Our latest Apple phones are the 📱 iPhone 17 series:\n• iPhone 17e — $599\n• iPhone 17 — $829\n• iPhone Air — $999\n• iPhone 17 Pro — $1,099\n• iPhone 17 Pro Max — $1,199\nAny of those catch your eye?";
+  if (/(galaxy|samsung)/.test(t) && /(new|latest|best|s26|price|deal)/.test(t))
+    return "Hot Samsung picks right now 🤖:\n• Galaxy S26 — $899\n• Galaxy S26+ — $1,099\n• Galaxy S26 Ultra — $1,299\n• Galaxy Z Flip 7 — $1,099\n• Galaxy Z Fold 7 — $2,199\nWant me to list more?";
+  if (/(price|cost|how much|cheap)/.test(t))
+    return "Prices are right on each product card 💵. Use the brand filters (Apple / Samsung) or categories above to narrow things down. Check the green 'DEAL' tags for current markdowns!";
+  if (/(ship|delivery|deliver)/.test(t))
+    return "We offer 📦 FREE standard shipping on all orders, with delivery in 2–5 business days. Checkout takes about a minute.";
+  if (/(warranty|return|refund)/.test(t))
+    return "Every device includes a 🛡️ 1-year warranty and ↩️ 30-day hassle-free returns. Just message our support team if anything seems off.";
+  if (/(tablet|ipad|tab)/.test(t))
+    return "Great tablets available:\n• iPad (A16) — $349\n• iPad Air M4 — $599\n• iPad Pro M5 — $1,299\n• Galaxy Tab S11 — $749\n• Galaxy Tab S11 Ultra — $1,299\nAny one in particular?";
+  if (/(watch|airpod|bud|mac|audio|headphone)/.test(t))
+    return "We carry smartwatches ⌚, earbuds 🎧 and MacBooks 💻 too! Use the category chips (Watches / Audio / Laptops) right above the product grid to browse them.";
+  if (/(order|buy|checkout|cart)/.test(t))
+    return "Head to your 🛒 cart (top right), then hit 'Proceed to Checkout' — it only takes a few details and you're all set!";
+  if (/(thank|thanks|great|nice|cool)/.test(t))
+    return "You're welcome! 😊 Happy shopping at TechNest — anything else I can help with?";
+  if (/(bye|goodbye|later)/.test(t))
+    return "Thanks for stopping by! 👋 Come back soon for the newest Apple & Samsung gear!";
+  return "I'm a demo assistant, so I'm still learning 🙂. Try asking about iPhones 📱, Galaxy phones 🤖, prices 💵, shipping 📦, or warranty 🛡️ — or ask me \"Hi\"!";
+}
+
+function addMsg(text, who) {
+  const div = document.createElement("div");
+  div.className = "msg " + who;
+  div.textContent = text;
+  chatBody.appendChild(div);
+  chatBody.scrollTop = chatBody.scrollHeight;
+}
+
+function botSend(text) {
+  const typing = document.createElement("div");
+  typing.className = "typing";
+  typing.textContent = "";
+  chatBody.appendChild(typing);
+  setTimeout(() => {
+    typing.remove();
+    addMsg(botReply(text), "bot");
+  }, 450 + Math.random() * 500);
+}
+
+function userSend() {
+  const text = chatInput.value.trim();
+  if (!text) return;
+  addMsg(text, "user");
+  chatInput.value = "";
+  botSend(text);
+}
+
+function openChat() {
+  chatWindow.classList.add("show");
+  renderQuickChips();
+  if (!chatBody.childElementCount) {
+    addMsg("Hi there! 👋 I'm the TechNest Assistant. I can help you find devices and prices. Try one of these quick questions ⬇️", "bot");
+  }
+  chatInput.focus();
+}
+
+function renderQuickChips() {
+  chatQuick.innerHTML = QUICK_CHIPS.map(c => `<button class="quick-chip" data-q="${c}">${c}</button>`).join("");
+}
+
+chatLauncher.addEventListener("click", () => {
+  if (chatWindow.classList.contains("show")) closeChat();
+  else openChat();
+});
+chatClose.addEventListener("click", closeChat);
+function closeChat() { chatWindow.classList.remove("show"); }
+
+chatSend.addEventListener("click", userSend);
+chatInput.addEventListener("keydown", e => { if (e.key === "Enter") userSend(); });
+chatQuick.addEventListener("click", e => {
+  const chip = e.target.closest(".quick-chip");
+  if (!chip) return;
+  addMsg(chip.dataset.q, "user");
+  botSend(chip.dataset.q);
+});
+
+/* ---------------- Init ---------------- */
+renderGrid();
+renderCart();
+</script>
+</body>
+</html>

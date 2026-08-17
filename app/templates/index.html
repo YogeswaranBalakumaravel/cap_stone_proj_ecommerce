@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+
+{% block title %}Flagship Phones Showcase{% endblock %}
+
+{% block content %}
+  <div class="toolbar">
+    <p class="count">{{ phones|length }} phone{{ 's' if phones|length != 1 else '' }}
+      {% if current_brand and current_brand != 'All' %}&middot; {{ current_brand }}{% endif %}
+    </p>
+
+    <form class="sort-form" method="get">
+      {% if current_brand and current_brand != 'All' %}
+        <input type="hidden" name="brand" value="{{ current_brand }}">
+      {% endif %}
+      <label for="sort">Sort by</label>
+      <select id="sort" name="sort" onchange="this.form.submit()">
+        <option value="" {{ 'selected' if not current_sort else '' }}>Featured</option>
+        <option value="price" {{ 'selected' if current_sort == 'price' else '' }}>Price: low to high</option>
+        <option value="release_date" {{ 'selected' if current_sort == 'release_date' else '' }}>Newest first</option>
+      </select>
+    </form>
+  </div>
+
+  {% if phones %}
+  <div class="card-grid">
+    {% for phone in phones %}
+      <a class="phone-card" href="{{ url_for('main.detail', phone_id=phone.id) }}">
+        <div class="card-image brand-{{ phone.brand|lower }}">
+          <img src="{{ url_for('static', filename=phone.image_url) }}" alt="{{ phone.model_name }}">
+        </div>
+        <div class="card-body">
+          <span class="badge tier-badge">{{ phone.tier }}</span>
+          <h3 class="card-title">{{ phone.model_name }}</h3>
+          <p class="card-brand">{{ phone.brand }}</p>
+          <p class="card-price">${{ '{:,.0f}'.format(phone.price_usd) }}</p>
+        </div>
+      </a>
+    {% endfor %}
+  </div>
+  {% else %}
+    <p class="empty-state">No phones match this filter.</p>
+  {% endif %}
+{% endblock %}

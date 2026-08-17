@@ -1,0 +1,11 @@
+{% extends "base.html" %}
+
+{% block title %}Not found &mdash; Flagship Phones Showcase{% endblock %}
+
+{% block content %}
+  <div class="empty-state">
+    <h1>404</h1>
+    <p>We couldn't find that phone.</p>
+    <a class="back-link" href="{{ url_for('main.index') }}">&larr; Back to catalog</a>
+  </div>
+{% endblock %}

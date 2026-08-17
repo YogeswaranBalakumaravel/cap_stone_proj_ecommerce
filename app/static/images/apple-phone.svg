@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 400" width="140" height="280">
+  <rect x="10" y="10" width="180" height="380" rx="36" fill="#111113" stroke="#3a3a3c" stroke-width="4"/>
+  <rect x="24" y="30" width="152" height="340" rx="22" fill="#000000"/>
+  <rect x="24" y="30" width="152" height="340" rx="22" fill="url(#appleScreen)"/>
+  <rect x="80" y="42" width="40" height="10" rx="5" fill="#1c1c1e"/>
+  <circle cx="100" cy="370" r="3" fill="#3a3a3c"/>
+  <defs>
+    <linearGradient id="appleScreen" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#3a3a3c"/>
+      <stop offset="1" stop-color="#0a0a0a"/>
+    </linearGradient>
+  </defs>
+  <text x="100" y="205" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="22" fill="#f5f6f8" font-weight="700"></text>
+</svg>
