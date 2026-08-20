@@ -4,7 +4,7 @@ target-version = "py312"
 exclude = ["instance"]
 
 [tool.ruff.lint]
-select = ["E", "F", "W", "I"]
+select = ["E", "F", "W", "I", "B", "UP"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
