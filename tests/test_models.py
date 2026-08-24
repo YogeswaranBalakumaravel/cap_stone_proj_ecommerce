@@ -57,3 +57,44 @@ def test_to_dict_shape(app):
         assert data["model_name"] == "Dict Test"
         assert data["storage_options_gb"] == ["256", "512"]
         assert data["price_usd"] == 1099.0
+
+
+def test_storage_options_list_empty_string(app):
+    with app.app_context():
+        phone = Phone(
+            brand="Apple",
+            model_name="No Storage Test",
+            screen_size_in=6.1,
+            chip="Test Chip",
+            ram_gb=8,
+            storage_options_gb="",
+        )
+        assert phone.storage_options_list == []
+
+
+def test_to_dict_handles_missing_release_date(app):
+    with app.app_context():
+        phone = Phone(
+            brand="Samsung",
+            model_name="No Date Test",
+            screen_size_in=6.2,
+            chip="Test Chip",
+            ram_gb=12,
+            storage_options_gb="128",
+            release_date=None,
+        )
+        data = phone.to_dict()
+        assert data["release_date"] is None
+
+
+def test_repr_includes_brand_and_model_name(app):
+    with app.app_context():
+        phone = Phone(
+            brand="Apple",
+            model_name="Repr Test",
+            screen_size_in=6.1,
+            chip="Test Chip",
+            ram_gb=8,
+            storage_options_gb="128",
+        )
+        assert repr(phone) == "<Phone Apple Repr Test>"
