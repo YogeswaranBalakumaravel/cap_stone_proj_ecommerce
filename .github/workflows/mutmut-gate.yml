@@ -38,6 +38,17 @@ jobs:
         # below is what actually enforces the threshold.
         run: mutmut run
 
+      - name: Show surviving mutants (diagnostic)
+        if: always()
+        run: |
+          mutmut results --all | tee /tmp/mutmut-results.txt
+          echo "----- diffs for non-killed mutants -----"
+          grep -v ': killed$' /tmp/mutmut-results.txt | sed 's/^ *//; s/:.*//' | while read -r name; do
+            [ -z "$name" ] && continue
+            echo "=== $name ==="
+            mutmut show "$name" || true
+          done
+
       - name: Export mutation stats
         run: mutmut export-cicd-stats
 
