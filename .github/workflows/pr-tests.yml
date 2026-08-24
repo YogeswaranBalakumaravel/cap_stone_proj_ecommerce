@@ -1,0 +1,72 @@
+name: PR Test Gate
+
+# Runs the unit test suite on every pull request targeting main, dev, or
+# staging and requires a 100% pass rate (no failures, no errors) before the
+# check goes green. Separate from ci.yml/ci-dev.yml/ci-uat.yml, which cover
+# lint + security scan + test + deploy per branch.
+
+on:
+  pull_request:
+    branches: [main, dev, staging]
+
+jobs:
+  pr-test-gate:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run unit tests
+        run: pytest --maxfail=1 --junitxml=pytest-report.xml
+
+      - name: Enforce 100% pass rate
+        if: always()
+        run: |
+          python - <<'EOF'
+          import os
+          import sys
+          import xml.etree.ElementTree as ET
+
+          tree = ET.parse("pytest-report.xml")
+          root = tree.getroot()
+          suite = root.find("testsuite") if root.tag == "testsuites" else root
+
+          total = int(suite.attrib.get("tests", 0))
+          failed = int(suite.attrib.get("failures", 0))
+          errored = int(suite.attrib.get("errors", 0))
+          skipped = int(suite.attrib.get("skipped", 0))
+          passed = total - failed - errored - skipped
+          rate = (passed / total * 100) if total else 0
+
+          summary = (
+              f"Tests: {total} total, {passed} passed, {failed} failed, "
+              f"{errored} errored, {skipped} skipped -- pass rate {rate:.2f}%"
+          )
+          print(summary)
+          summary_path = os.environ.get("GITHUB_STEP_SUMMARY")
+          if summary_path:
+              with open(summary_path, "a") as f:
+                  f.write(f"### PR Test Gate\n{summary}\n")
+
+          if total == 0:
+              sys.exit("No tests were collected -- failing the gate.")
+          if rate < 100:
+              sys.exit(f"Pass rate {rate:.2f}% is below the required 100%.")
+          EOF
+
+      - name: Upload test report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pytest-report
+          path: pytest-report.xml
