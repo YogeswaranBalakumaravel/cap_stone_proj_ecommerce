@@ -41,7 +41,7 @@ jobs:
       - name: Show surviving mutants (diagnostic)
         if: always()
         run: |
-          mutmut results --all | tee /tmp/mutmut-results.txt
+          mutmut results --all=true | tee /tmp/mutmut-results.txt
           echo "----- diffs for non-killed mutants -----"
           grep -v ': killed$' /tmp/mutmut-results.txt | sed 's/^ *//; s/:.*//' | while read -r name; do
             [ -z "$name" ] && continue
