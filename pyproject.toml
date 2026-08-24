@@ -9,3 +9,8 @@ select = ["E", "F", "W", "I", "B", "UP"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
+
+[tool.mutmut]
+source_paths = ["app"]
+pytest_add_cli_args_test_selection = ["tests/"]
+also_copy = ["config.py"]
