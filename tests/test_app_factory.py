@@ -30,6 +30,14 @@ def test_create_app_creates_instance_path():
     assert os.path.isdir(app.instance_path)
 
 
+def test_create_app_uses_instance_relative_config():
+    # create_app passes instance_relative_config=True to Flask, which makes
+    # app.config resolve relative paths (e.g. from_pyfile calls) against the
+    # instance folder rather than the app's package root.
+    app = create_app(config_object=TestingConfig)
+    assert app.config.root_path == app.instance_path
+
+
 def test_create_app_registers_main_blueprint():
     app = create_app(config_object=TestingConfig)
     assert "main" in app.blueprints
