@@ -48,15 +48,41 @@ def test_to_dict_shape(app):
             ram_gb=8,
             storage_options_gb="256,512",
             price_usd=1099.0,
+            camera_summary="Triple 48MP",
+            image_url="https://example.com/phone.png",
+            is_current=True,
         )
         db.session.add(phone)
         db.session.commit()
 
         data = phone.to_dict()
+        assert set(data.keys()) == {
+            "id",
+            "brand",
+            "model_name",
+            "tier",
+            "release_date",
+            "price_usd",
+            "screen_size_in",
+            "chip",
+            "ram_gb",
+            "storage_options_gb",
+            "camera_summary",
+            "image_url",
+            "is_current",
+        }
+        assert data["id"] == phone.id
         assert data["brand"] == "Apple"
         assert data["model_name"] == "Dict Test"
+        assert data["tier"] == "Pro"
+        assert data["screen_size_in"] == 6.3
+        assert data["chip"] == "A19 Pro"
+        assert data["ram_gb"] == 8
         assert data["storage_options_gb"] == ["256", "512"]
         assert data["price_usd"] == 1099.0
+        assert data["camera_summary"] == "Triple 48MP"
+        assert data["image_url"] == "https://example.com/phone.png"
+        assert data["is_current"] is True
 
 
 def test_storage_options_list_empty_string(app):

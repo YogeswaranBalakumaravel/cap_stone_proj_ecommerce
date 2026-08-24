@@ -1,0 +1,21 @@
+name: OSV-Scanner PR Scan
+
+# Scans dependency manifests (requirements.txt) for known vulnerabilities on
+# every pull request targeting main, dev, or staging, using Google's
+# official OSV-Scanner reusable workflow. Compares the PR branch against the
+# target branch and fails on newly introduced vulnerabilities.
+
+on:
+  pull_request:
+    branches: [main, dev, staging]
+  merge_group:
+    branches: [main, dev, staging]
+
+permissions:
+  actions: read
+  security-events: write
+  contents: read
+
+jobs:
+  scan-pr:
+    uses: "google/osv-scanner-action/.github/workflows/osv-scanner-reusable-pr.yml@v2.5.1"

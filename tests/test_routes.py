@@ -51,6 +51,15 @@ def test_api_phones_sort_by_price_is_ascending(client):
     assert prices == sorted(prices)
 
 
+def test_api_phones_default_sort_is_brand_then_price_descending(client):
+    # No ?sort= given -> falls into _query_phones' else branch: brand
+    # ascending, then price descending within each brand.
+    resp = client.get("/api/phones")
+    data = resp.get_json()
+    keys = [(p["brand"], -p["price_usd"]) for p in data]
+    assert keys == sorted(keys)
+
+
 def test_api_phones_sort_by_release_date_is_descending(client):
     resp = client.get("/api/phones?sort=release_date")
     data = resp.get_json()
