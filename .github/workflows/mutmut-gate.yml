@@ -1,0 +1,89 @@
+name: Mutmut QA Gate
+
+# Mutation testing gate: on every pull request targeting main, dev, or
+# staging, mutates app/ and reruns the test suite against each mutant to
+# check whether the tests actually catch the change. Fails the check if the
+# mutation score (killed + timeout, over non-skipped mutants) drops below
+# MUTATION_SCORE_THRESHOLD. Mutmut has no native Windows support -- this
+# only runs in CI (ubuntu-latest); see CLAUDE.md for local dev notes.
+
+on:
+  pull_request:
+    branches: [main, dev, staging]
+
+env:
+  MUTATION_SCORE_THRESHOLD: "80"
+
+jobs:
+  mutmut-gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run mutation testing
+        # mutmut run's own exit code only reflects harness failures (e.g. a
+        # broken baseline test run), not survived mutants -- the score gate
+        # below is what actually enforces the threshold.
+        run: mutmut run
+
+      - name: Export mutation stats
+        run: mutmut export-cicd-stats
+
+      - name: Enforce mutation score threshold
+        run: |
+          python - <<'EOF'
+          import json
+          import os
+          import sys
+
+          with open("mutants/mutmut-cicd-stats.json") as f:
+              stats = json.load(f)
+
+          killed = stats.get("killed", 0)
+          timeout = stats.get("timeout", 0)
+          survived = stats.get("survived", 0)
+          total = stats.get("total", 0)
+          skipped = stats.get("skipped", 0)
+          no_tests = stats.get("no_tests", 0)
+          suspicious = stats.get("suspicious", 0)
+
+          tested = total - skipped
+          score = ((killed + timeout) / tested * 100) if tested > 0 else 0.0
+          threshold = float(os.environ["MUTATION_SCORE_THRESHOLD"])
+
+          summary = (
+              f"Mutants: {total} total, {killed} killed, {timeout} timeout, "
+              f"{survived} survived, {suspicious} suspicious, {no_tests} no-tests, "
+              f"{skipped} skipped -- mutation score {score:.2f}% "
+              f"(threshold {threshold:.2f}%)"
+          )
+          print(summary)
+          summary_path = os.environ.get("GITHUB_STEP_SUMMARY")
+          if summary_path:
+              with open(summary_path, "a") as f:
+                  f.write(f"### Mutmut QA Gate\n{summary}\n")
+
+          if tested == 0:
+              sys.exit("No mutants were tested -- failing the gate.")
+          if score < threshold:
+              sys.exit(f"Mutation score {score:.2f}% is below the required {threshold:.2f}%.")
+          EOF
+
+      - name: Upload mutation report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mutmut-report
+          path: mutants/mutmut-cicd-stats.json
