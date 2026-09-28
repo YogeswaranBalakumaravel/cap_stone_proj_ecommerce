@@ -45,6 +45,13 @@ the `RENDER_DEPLOY_HOOK_URL` repo secret to enable; the step is skipped if
 it's unset). An optional, non-blocking AI review gate stage is stubbed out
 in the workflow for later.
 
+`.github/workflows/test-quality-agent.yml` reviews the tests in every PR to
+`main`, `dev` and `staging` with a headless Claude Code agent, and posts the
+result as a PR comment: are the tests meaningful, are the business scenarios,
+rainy-day paths and edge cases covered, are any assertions trivial, and do the
+tests validate the change. It needs no API key: the agent signs in with the job's
+GitHub OIDC token. See `.qa/agent/README.md` for setup.
+
 ## Deploy to Render
 
 **Option A — `render.yaml` (recommended):** push this repo to GitHub, then

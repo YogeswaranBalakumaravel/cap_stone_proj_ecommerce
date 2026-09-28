@@ -1,0 +1,571 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "summary",
+    "dimensions",
+    "criteria",
+    "changed_units",
+    "error_paths",
+    "boundaries",
+    "tests",
+    "equivalent_probes",
+    "limitations",
+    "confidence",
+    "findings"
+  ],
+  "properties": {
+    "summary": {
+      "type": "string",
+      "description": "Two sentences at most: overall verdict on the tests in this PR"
+    },
+    "dimensions": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "meaningful_tests",
+        "business_scenarios",
+        "sunny_rainy",
+        "edge_cases",
+        "trivial_assertions",
+        "change_validation"
+      ],
+      "properties": {
+        "meaningful_tests": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "status",
+            "rationale"
+          ],
+          "properties": {
+            "status": {
+              "type": "string",
+              "enum": [
+                "pass",
+                "concern",
+                "fail",
+                "not_applicable"
+              ]
+            },
+            "rationale": {
+              "type": "string",
+              "description": "One or two sentences"
+            }
+          }
+        },
+        "business_scenarios": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "status",
+            "rationale"
+          ],
+          "properties": {
+            "status": {
+              "type": "string",
+              "enum": [
+                "pass",
+                "concern",
+                "fail",
+                "not_applicable"
+              ]
+            },
+            "rationale": {
+              "type": "string",
+              "description": "One or two sentences"
+            }
+          }
+        },
+        "sunny_rainy": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "status",
+            "rationale"
+          ],
+          "properties": {
+            "status": {
+              "type": "string",
+              "enum": [
+                "pass",
+                "concern",
+                "fail",
+                "not_applicable"
+              ]
+            },
+            "rationale": {
+              "type": "string",
+              "description": "One or two sentences"
+            }
+          }
+        },
+        "edge_cases": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "status",
+            "rationale"
+          ],
+          "properties": {
+            "status": {
+              "type": "string",
+              "enum": [
+                "pass",
+                "concern",
+                "fail",
+                "not_applicable"
+              ]
+            },
+            "rationale": {
+              "type": "string",
+              "description": "One or two sentences"
+            }
+          }
+        },
+        "trivial_assertions": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "status",
+            "rationale"
+          ],
+          "properties": {
+            "status": {
+              "type": "string",
+              "enum": [
+                "pass",
+                "concern",
+                "fail",
+                "not_applicable"
+              ]
+            },
+            "rationale": {
+              "type": "string",
+              "description": "One or two sentences"
+            }
+          }
+        },
+        "change_validation": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "status",
+            "rationale"
+          ],
+          "properties": {
+            "status": {
+              "type": "string",
+              "enum": [
+                "pass",
+                "concern",
+                "fail",
+                "not_applicable"
+              ]
+            },
+            "rationale": {
+              "type": "string",
+              "description": "One or two sentences"
+            }
+          }
+        }
+      }
+    },
+    "criteria": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "text",
+          "source",
+          "importance",
+          "status",
+          "tests"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Criterion id; number unlabelled ones AC-1, AC-2... in order of appearance"
+          },
+          "text": {
+            "type": "string",
+            "description": "The criterion, shortened if long"
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "acceptance_criteria",
+              "inferred"
+            ]
+          },
+          "importance": {
+            "type": "string",
+            "enum": [
+              "must",
+              "should"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "covered",
+              "partial",
+              "missing"
+            ]
+          },
+          "tests": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "file",
+                "line",
+                "name"
+              ],
+              "properties": {
+                "file": {
+                  "type": "string",
+                  "description": "Test file path relative to the repository root"
+                },
+                "line": {
+                  "type": "integer",
+                  "description": "Line of the test's definition (its name) at the PR head"
+                },
+                "name": {
+                  "type": "string",
+                  "description": "Test function name, e.g. test_rejects_negative_price"
+                }
+              }
+            },
+            "description": "Tests that assert the criterion's observable outcome"
+          }
+        }
+      }
+    },
+    "changed_units": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "unit_id",
+          "file",
+          "line",
+          "name",
+          "behaviour_changed",
+          "tests"
+        ],
+        "properties": {
+          "unit_id": {
+            "type": "string"
+          },
+          "file": {
+            "type": "string"
+          },
+          "line": {
+            "type": "integer",
+            "description": "1-based line number in the file at the PR head"
+          },
+          "name": {
+            "type": "string"
+          },
+          "behaviour_changed": {
+            "type": "boolean"
+          },
+          "tests": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "file",
+                "line",
+                "name"
+              ],
+              "properties": {
+                "file": {
+                  "type": "string",
+                  "description": "Test file path relative to the repository root"
+                },
+                "line": {
+                  "type": "integer",
+                  "description": "Line of the test's definition (its name) at the PR head"
+                },
+                "name": {
+                  "type": "string",
+                  "description": "Test function name, e.g. test_rejects_negative_price"
+                }
+              }
+            },
+            "description": "Tests that exercise the new behaviour and would fail if it were reverted"
+          }
+        }
+      }
+    },
+    "error_paths": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "unit_id",
+          "file",
+          "line",
+          "description",
+          "negative_tests"
+        ],
+        "properties": {
+          "unit_id": {
+            "type": "string"
+          },
+          "file": {
+            "type": "string"
+          },
+          "line": {
+            "type": "integer",
+            "description": "1-based line number in the file at the PR head that implements the unhappy path"
+          },
+          "description": {
+            "type": "string",
+            "description": "e.g. raises ValueError when quantity <= 0"
+          },
+          "negative_tests": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "file",
+                "line",
+                "name"
+              ],
+              "properties": {
+                "file": {
+                  "type": "string",
+                  "description": "Test file path relative to the repository root"
+                },
+                "line": {
+                  "type": "integer",
+                  "description": "Line of the test's definition (its name) at the PR head"
+                },
+                "name": {
+                  "type": "string",
+                  "description": "Test function name, e.g. test_rejects_negative_price"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "boundaries": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "unit_id",
+          "file",
+          "line",
+          "boundary",
+          "tested",
+          "tests"
+        ],
+        "properties": {
+          "unit_id": {
+            "type": "string"
+          },
+          "file": {
+            "type": "string"
+          },
+          "line": {
+            "type": "integer",
+            "description": "1-based line number in the file at the PR head that makes this edge case relevant"
+          },
+          "boundary": {
+            "type": "string",
+            "description": "e.g. quantity exactly at BULK_THRESHOLD (10)"
+          },
+          "tested": {
+            "type": "boolean"
+          },
+          "tests": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "file",
+                "line",
+                "name"
+              ],
+              "properties": {
+                "file": {
+                  "type": "string",
+                  "description": "Test file path relative to the repository root"
+                },
+                "line": {
+                  "type": "integer",
+                  "description": "Line of the test's definition (its name) at the PR head"
+                },
+                "name": {
+                  "type": "string",
+                  "description": "Test function name, e.g. test_rejects_negative_price"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "tests": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "file",
+          "line",
+          "name",
+          "level",
+          "polarity",
+          "trivial",
+          "trivial_reason"
+        ],
+        "properties": {
+          "file": {
+            "type": "string"
+          },
+          "line": {
+            "type": "integer",
+            "description": "1-based line number in the file at the PR head of the test's definition"
+          },
+          "name": {
+            "type": "string"
+          },
+          "level": {
+            "type": "string",
+            "enum": [
+              "unit",
+              "integration",
+              "e2e"
+            ]
+          },
+          "polarity": {
+            "type": "string",
+            "enum": [
+              "positive",
+              "negative",
+              "mixed"
+            ]
+          },
+          "trivial": {
+            "type": "boolean"
+          },
+          "trivial_reason": {
+            "type": "string",
+            "description": "Why its assertions couldn't catch a realistic bug; empty if not trivial"
+          }
+        }
+      },
+      "description": "Every test added or modified in this PR, plus any existing test you cite"
+    },
+    "equivalent_probes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "probe_id",
+          "reason"
+        ],
+        "properties": {
+          "probe_id": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string",
+            "description": "Why this edit cannot change observable behaviour"
+          }
+        }
+      },
+      "description": "Survived probes that are provably equivalent; leave empty when unsure"
+    },
+    "limitations": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Missing inputs, or parts of the change you could not review; empty if none"
+    },
+    "confidence": {
+      "type": "string",
+      "enum": [
+        "high",
+        "medium",
+        "low"
+      ],
+      "description": "Lower it when inputs were missing or the change was too large to review fully"
+    },
+    "findings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "dimension",
+          "severity",
+          "file",
+          "line",
+          "title",
+          "evidence",
+          "recommendation"
+        ],
+        "properties": {
+          "dimension": {
+            "type": "string",
+            "enum": [
+              "meaningful_tests",
+              "business_scenarios",
+              "sunny_rainy",
+              "edge_cases",
+              "trivial_assertions",
+              "change_validation"
+            ]
+          },
+          "severity": {
+            "type": "string",
+            "enum": [
+              "high",
+              "medium",
+              "low"
+            ]
+          },
+          "file": {
+            "type": "string",
+            "description": "File that shows the problem"
+          },
+          "line": {
+            "type": "integer",
+            "description": "1-based line number in the file at the PR head"
+          },
+          "title": {
+            "type": "string",
+            "description": "One line"
+          },
+          "evidence": {
+            "type": "string",
+            "description": "What you saw, with the probe id if one confirms it"
+          },
+          "recommendation": {
+            "type": "string",
+            "description": "Suggested test as given / when / then: the setup, the action and the exact assertion"
+          }
+        }
+      }
+    }
+  }
+}

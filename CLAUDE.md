@@ -75,6 +75,16 @@ only, triggers a Render deploy hook (skipped if `RENDER_DEPLOY_HOOK_URL` secret
 is unset). There's a commented-out `ai-review` job stubbed in for a future
 non-blocking AI PR review gate — leave it commented unless asked to wire it up.
 
+`.github/workflows/test-quality-agent.yml`: on PRs to `main`, `dev` and `staging`,
+a headless Claude Code agent reviews the tests the PR brings (meaningful? business
+scenarios covered? sunny/rainy days? edge cases? trivial assertions? validates the
+change?). The code lives in `.qa/agent/` (standard-library Python only; see
+`.qa/agent/README.md`). It signs in with the job's GitHub OIDC token, never an API
+key or OAuth token; with the `QA_PROVIDER` repo variable unset it runs its
+scripts-only checks. The workflow loads `.qa/agent/` from the PR's base branch, so
+changes to it take effect only after they merge. Advisory by default
+(`QA_MODE=blocking` repo variable to enforce).
+
 ## Notes / non-goals (v1)
 
 No auth/accounts/reviews, no live price-tracking/scraping, no purchase flow —
