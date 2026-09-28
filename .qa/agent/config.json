@@ -1,5 +1,5 @@
 {
-  "mode": "advisory",
+  "mode": "blocking",
   "fail_closed": false,
   "paths": {
     "source_globs": [
@@ -21,7 +21,6 @@
       "*/migrations/*",
       "docs/*",
       "setup.py",
-      "mutants/*",
       "instance/*"
     ]
   },

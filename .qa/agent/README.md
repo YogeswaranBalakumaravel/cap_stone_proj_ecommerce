@@ -75,7 +75,7 @@ The thresholds are starting points. Tune them in `config.json` once you've calib
    /.github/workflows/  @your-org/qa-team
    ```
 6. **Write acceptance criteria in the PR description** under an "Acceptance criteria" heading (the PR template adds one). Alternatively, set `JIRA_BASE_URL` and `JIRA_EMAIL` as repository variables and `JIRA_API_TOKEN` as a secret; the agent then reads the ticket whose key appears in the branch name or PR title.
-7. **Start in advisory mode** (the default). The agent comments on the PR without blocking it.
+7. **Blocking is the default.** A PR fails the check when a blocking check fails. Make **Test quality agent / review** a required status check on `main`, `dev` and `staging` so it can't be merged around. Set the repository variable `QA_MODE=advisory` to only comment.
 
 ## Signing in without keys
 
@@ -179,14 +179,14 @@ The PR comment shows the six checks against their thresholds, a **Gate reasons**
 
 ## Rollout and calibration
 
-1. **Advisory first.** Run it on real PRs for two to four weeks. The agent comments but never blocks.
+1. **Calibrate in advisory mode if needed.** This repo ships in blocking mode. To tune thresholds without blocking PRs, set `QA_MODE=advisory` for a few weeks.
 2. **Build a golden set** of 15 to 20 past PRs that your senior SDETs have already judged. Include some with deliberately weak tests: missing boundaries, a trivial assertion, an untested error path. Run the agent on the golden set after every change to a prompt or threshold.
 3. **Measure the agent**:
    - Agreement rate = golden PRs where the agent's verdict matches the SDETs' ÷ golden PRs.
    - High-severity false-positive rate = high findings the SDETs reject ÷ all high findings.
    - Miss rate = planted weaknesses the agent didn't flag ÷ planted weaknesses.
    - Citation validity comes from `metrics.json`.
-4. **Switch to blocking** (repository variable `QA_MODE=blocking`) once high-severity false positives are rare, for example under 10% with at least 85% agreement. Make the `review` job (**Test quality agent / review**) a required status check in branch protection. Keep only `business_scenarios` and `change_validation` in `blocking_dimensions` at first; the other checks stay advisory.
+4. **Stay in blocking** (or switch back from advisory) once high-severity false positives are rare, for example under 10% with at least 85% agreement. Keep the `review` job (**Test quality agent / review**) a required status check in branch protection. Keep only `business_scenarios` and `change_validation` in `blocking_dimensions` at first; the other checks stay advisory.
 
 To run the agent on a past PR, run this from the repository root:
 

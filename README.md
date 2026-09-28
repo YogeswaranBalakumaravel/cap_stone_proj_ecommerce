@@ -50,7 +50,9 @@ in the workflow for later.
 result as a PR comment: are the tests meaningful, are the business scenarios,
 rainy-day paths and edge cases covered, are any assertions trivial, and do the
 tests validate the change. It needs no API key: the agent signs in with the job's
-GitHub OIDC token. See `.qa/agent/README.md` for setup.
+GitHub OIDC token. It's the mandatory gate for all three pipelines: it blocks the
+PR when a blocking check fails, and **Test quality agent / review** is a required
+status check on `main`, `dev` and `staging`. See `.qa/agent/README.md` for setup.
 
 ## Deploy to Render
 

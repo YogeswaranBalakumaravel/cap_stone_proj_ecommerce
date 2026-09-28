@@ -82,8 +82,11 @@ change?). The code lives in `.qa/agent/` (standard-library Python only; see
 `.qa/agent/README.md`). It signs in with the job's GitHub OIDC token, never an API
 key or OAuth token; with the `QA_PROVIDER` repo variable unset it runs its
 scripts-only checks. The workflow loads `.qa/agent/` from the PR's base branch, so
-changes to it take effect only after they merge. Advisory by default
-(`QA_MODE=blocking` repo variable to enforce).
+changes to it take effect only after they merge. It's the mandatory PR gate for
+`main`, `dev` and `staging`: blocking by default (`QA_MODE=advisory` repo variable
+to only comment), and a required status check (**Test quality agent / review**).
+The earlier Mutmut and OSV-Scanner gates were removed; the agent's systematic
+mutants cover mutation testing.
 
 ## Notes / non-goals (v1)
 

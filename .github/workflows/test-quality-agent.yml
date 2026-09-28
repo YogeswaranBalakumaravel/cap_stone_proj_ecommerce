@@ -27,7 +27,7 @@ concurrency:
 
 env:
   QA_OUT: .qa-out
-  QA_MODE: ${{ vars.QA_MODE }}            # advisory (default) or blocking
+  QA_MODE: ${{ vars.QA_MODE }}            # blocking (default) or advisory
   QA_PROVIDER: ${{ vars.QA_PROVIDER }}    # anthropic, bedrock, vertex, foundry, or none (default)
   QA_MODEL: ${{ vars.QA_MODEL }}          # optional; required for foundry (the deployment name)
   CLAUDE_CODE_VERSION: latest             # pin an exact version for reproducible runs
