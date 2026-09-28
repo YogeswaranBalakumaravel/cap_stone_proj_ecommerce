@@ -188,6 +188,12 @@ The PR comment shows the six checks against their thresholds, a **Gate reasons**
    - Citation validity comes from `metrics.json`.
 4. **Stay in blocking** (or switch back from advisory) once high-severity false positives are rare, for example under 10% with at least 85% agreement. Keep the `review` job (**Test quality agent / review**) a required status check in branch protection. Keep only `business_scenarios` and `change_validation` in `blocking_dimensions` at first; the other checks stay advisory.
 
+## Full-project audit
+
+To run the whole project through the gate, not just one PR's changes, open **Actions → Test quality agent → Run workflow** and pick a branch (`main`, `dev` or `staging`). The run treats every tracked file as new, runs changed-line coverage over all of it, tries up to 60 systematic mutants, and scans every test. The report goes to the run's summary page instead of a PR comment. The "change reverted" check doesn't apply, because there's no earlier version to revert to.
+
+Locally, set `QA_FULL_AUDIT=1` (and optionally `QA_SYSTEMATIC_MAX=60`) and run the five scripts as below.
+
 To run the agent on a past PR, run this from the repository root:
 
 ```bash

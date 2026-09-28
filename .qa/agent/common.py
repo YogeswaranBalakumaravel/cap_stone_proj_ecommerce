@@ -49,6 +49,8 @@ def load_config() -> dict:
         cfg["tests"]["command"] = os.environ["QA_TEST_COMMAND"]
     if "QA_TARGETED_TEST_COMMAND" in os.environ:
         cfg["tests"]["targeted_command"] = os.environ["QA_TARGETED_TEST_COMMAND"]
+    if os.environ.get("QA_SYSTEMATIC_MAX", "").strip().isdigit():
+        cfg["probes"]["systematic_max"] = int(os.environ["QA_SYSTEMATIC_MAX"])
     if cfg.get("mode") not in ("advisory", "blocking"):
         raise SystemExit(
             f"config.json: mode must be 'advisory' or 'blocking', got {cfg.get('mode')!r}"
@@ -95,7 +97,38 @@ def base_ref() -> str:
     return "origin/main"
 
 
+def full_audit() -> bool:
+    """QA_FULL_AUDIT=1 reviews the whole project, as if every file were new."""
+    return os.environ.get("QA_FULL_AUDIT", "").strip().lower() in ("1", "true", "yes")
+
+
+def _empty_base_commit() -> str:
+    """A commit with an empty tree, so diffing it against HEAD lists every tracked file."""
+    empty_tree = subprocess.run(
+        ["git", "hash-object", "-t", "tree", "-w", "--stdin"],
+        cwd=REPO,
+        input="",
+        capture_output=True,
+        encoding="utf-8",
+        check=True,
+    ).stdout.strip()
+    ident = {"GIT_AUTHOR_NAME": "qa-audit", "GIT_AUTHOR_EMAIL": "qa-audit@localhost"}
+    ident |= {"GIT_COMMITTER_NAME": "qa-audit", "GIT_COMMITTER_EMAIL": "qa-audit@localhost"}
+    epoch = "1970-01-01T00:00:00Z"
+    ident |= {"GIT_AUTHOR_DATE": epoch, "GIT_COMMITTER_DATE": epoch}
+    return subprocess.run(
+        ["git", "commit-tree", empty_tree, "-m", "empty base for a full-project audit"],
+        cwd=REPO,
+        capture_output=True,
+        encoding="utf-8",
+        check=True,
+        env={**os.environ, **ident},
+    ).stdout.strip()
+
+
 def merge_base() -> str:
+    if full_audit():
+        return _empty_base_commit()
     return git("merge-base", "HEAD", base_ref()).strip()
 
 

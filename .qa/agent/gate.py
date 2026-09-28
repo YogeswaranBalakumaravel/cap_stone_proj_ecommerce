@@ -1134,6 +1134,8 @@ def main() -> int:
         headline = "Passed"
     if agent_off:
         headline += " (scripts only, agent off)"
+    if ctx.get("full_audit"):
+        headline += ", full-project audit"
     exit_code = (
         1
         if mode == "blocking" and (blocking_fail or (incomplete and cfg.get("fail_closed")))

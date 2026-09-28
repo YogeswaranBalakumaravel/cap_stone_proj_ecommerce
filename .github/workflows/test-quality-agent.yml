@@ -18,11 +18,14 @@ on:
   pull_request:
     branches: [main, dev, staging]   # same branches as the other PR gates
     types: [opened, synchronize, reopened, ready_for_review]
+  # Actions > Test quality agent > Run workflow: audit the whole project on the chosen branch,
+  # as if every file were new. The report goes to the run summary instead of a PR comment.
+  workflow_dispatch:
 
 permissions: {}   # each job asks for exactly what it needs
 
 concurrency:
-  group: test-quality-${{ github.event.pull_request.number }}
+  group: test-quality-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 env:
@@ -31,13 +34,17 @@ env:
   QA_PROVIDER: ${{ vars.QA_PROVIDER }}    # anthropic, bedrock, vertex, foundry, or none (default)
   QA_MODEL: ${{ vars.QA_MODEL }}          # optional; required for foundry (the deployment name)
   CLAUDE_CODE_VERSION: latest             # pin an exact version for reproducible runs
+  # Manual runs audit the whole project and try more systematic mutants.
+  QA_FULL_AUDIT: ${{ github.event_name == 'workflow_dispatch' && '1' || '' }}
+  QA_SYSTEMATIC_MAX: ${{ github.event_name == 'workflow_dispatch' && '60' || '' }}
 
 jobs:
   plan:
     # Same-repository PRs only. Fork PRs can't request OIDC tokens for this repository.
     if: >-
-      github.event.pull_request.draft == false &&
-      github.event.pull_request.head.repo.full_name == github.repository
+      github.event_name == 'workflow_dispatch' || (
+        github.event.pull_request.draft == false &&
+        github.event.pull_request.head.repo.full_name == github.repository)
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
@@ -62,14 +69,14 @@ jobs:
       - name: Check out the PR head
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.pull_request.head.sha }}
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 0
 
       - name: Load the QA agent from the base branch
         # Prompts, schemas, thresholds and scripts come from the target branch, so a PR
         # can't soften its own review. Also protect .qa/ with CODEOWNERS.
         env:
-          BASE_REF: ${{ github.base_ref }}
+          BASE_REF: ${{ github.base_ref || github.ref_name }}
         run: |
           QA_ROOT="$RUNNER_TEMP/qa"
           mkdir -p "$QA_ROOT"
@@ -89,9 +96,9 @@ jobs:
       - name: 1. Collect PR context
         env:
           PR_NUMBER: ${{ github.event.pull_request.number }}
-          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_TITLE: ${{ github.event.pull_request.title || format('Full-project audit of {0}', github.ref_name) }}
           PR_BODY: ${{ github.event.pull_request.body }}
-          HEAD_REF: ${{ github.head_ref }}
+          HEAD_REF: ${{ github.head_ref || github.ref_name }}
           # Optional: read acceptance criteria from the Jira key in the branch name or PR title.
           JIRA_BASE_URL: ${{ vars.JIRA_BASE_URL }}
           JIRA_EMAIL: ${{ vars.JIRA_EMAIL }}
@@ -121,12 +128,12 @@ jobs:
       - name: Check out the PR head
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.pull_request.head.sha }}
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 0
 
       - name: Load the QA agent from the base branch
         env:
-          BASE_REF: ${{ github.base_ref }}
+          BASE_REF: ${{ github.base_ref || github.ref_name }}
         run: |
           QA_ROOT="$RUNNER_TEMP/qa"
           mkdir -p "$QA_ROOT"
@@ -196,12 +203,12 @@ jobs:
       - name: Check out the PR head
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.pull_request.head.sha }}
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 0
 
       - name: Load the QA agent from the base branch
         env:
-          BASE_REF: ${{ github.base_ref }}
+          BASE_REF: ${{ github.base_ref || github.ref_name }}
         run: |
           QA_ROOT="$RUNNER_TEMP/qa"
           mkdir -p "$QA_ROOT"
@@ -240,10 +247,10 @@ jobs:
       - name: 5. Gate
         if: always()
         env:
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
         run: python3 "$QA_HOME/gate.py"
 
-      - name: Post the report on the PR
+      - name: Post the report
         if: always()
         env:
           GH_TOKEN: ${{ github.token }}
@@ -251,6 +258,8 @@ jobs:
           PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
           [ -f .qa-out/report.md ] || { echo "No report to post."; exit 0; }
+          cat .qa-out/report.md >> "$GITHUB_STEP_SUMMARY"
+          [ -n "$PR_NUMBER" ] || { echo "Manual run: the report is in the run summary."; exit 0; }
           marker='<!-- test-quality-agent -->'
           id=$(gh api "repos/$GH_REPO/issues/$PR_NUMBER/comments" --paginate \
                  --jq ".[] | select(.body | contains(\"$marker\")) | .id" | tail -n 1)
