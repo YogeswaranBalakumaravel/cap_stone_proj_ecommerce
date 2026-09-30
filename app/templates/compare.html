@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+
+{% block title %}Compare phones &mdash; Flagship Phones Showcase{% endblock %}
+
+{% block content %}
+  <a class="back-link" href="{{ url_for('main.index') }}">&larr; Back to catalog</a>
+
+  {% if error %}
+    <div class="empty-state compare-error">
+      <h1>Can't compare these phones</h1>
+      <p>{{ error }}</p>
+      <a class="back-link" href="{{ url_for('main.index') }}">Pick two phones in the catalog</a>
+    </div>
+  {% else %}
+    <h1 class="compare-heading">{{ phones[0].model_name }} vs {{ phones[1].model_name }}</h1>
+    <p class="compare-legend"><span class="legend-differs">Highlighted rows differ.</span>
+      <span class="better-mark">Better</span> marks the better value.</p>
+
+    <table class="compare-table">
+      <thead>
+        <tr>
+          <th scope="col">Spec</th>
+          {% for phone in phones %}
+            <th scope="col" data-phone-id="{{ phone.id }}">
+              <a href="{{ url_for('main.detail', phone_id=phone.id) }}">{{ phone.model_name }}</a>
+            </th>
+          {% endfor %}
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in rows %}
+          <tr class="{{ 'differs' if row.differs else 'same' }}" data-spec="{{ row.spec }}">
+            <th scope="row">{{ row.label }}</th>
+            {% for value in row['values'] %}
+              {% set position = 'first' if loop.first else 'second' %}
+              <td class="{{ 'better' if row.better == position else '' }}">{{ value }}
+                {% if row.better == position %}<span class="better-mark">Better</span>{% endif %}
+              </td>
+            {% endfor %}
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% endif %}
+{% endblock %}

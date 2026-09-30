@@ -1,0 +1,32 @@
+name: Gitleaks Secret Scan
+
+# Scans for committed secrets (API keys, tokens, credentials) on dev and
+# staging, using the official Gitleaks GitHub Action. Runs on every push to
+# either branch and every pull request targeting either branch. No
+# GITLEAKS_LICENSE is needed here -- that's only required when the repo
+# owner is a GitHub Organization, not an individual user account.
+
+on:
+  push:
+    branches: [dev, staging]
+  pull_request:
+    branches: [dev, staging]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  gitleaks:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # full history, required for gitleaks to diff correctly
+
+      - name: Run Gitleaks
+        uses: gitleaks/gitleaks-action@v3
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_LICENSE: ${{ secrets.GITLEAKS_LICENSE }}
