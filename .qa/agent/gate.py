@@ -837,6 +837,12 @@ def evaluate(cfg: dict, ctx: dict, plan, probes, rv: dict, agent_off: bool = Fal
         threshold += "; tests must fail with the change reverted"
     decide("change_validation", checks, "; ".join(parts) or no_review, threshold)
 
+    if not source_changed and not tests_changed:
+        # Nothing to measure (docs, CI or config only): say so instead of "agent off".
+        for d in dims.values():
+            if d["status"] == "NO DATA":
+                d["measured"] = "n/a (no source or test changes)"
+
     return {"dimensions": dims, "findings": findings, "metrics": metrics}
 
 

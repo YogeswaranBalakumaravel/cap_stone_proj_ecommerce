@@ -45,7 +45,7 @@ jobs:
       github.event_name == 'workflow_dispatch' || (
         github.event.pull_request.draft == false &&
         github.event.pull_request.head.repo.full_name == github.repository)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     permissions:
       contents: read
@@ -67,7 +67,7 @@ jobs:
       AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
     steps:
       - name: Check out the PR head
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 0
@@ -110,7 +110,7 @@ jobs:
         run: python3 "$QA_HOME/run_agent.py" plan
 
       - name: Hand over to the evidence job
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: qa-plan
           path: .qa-out/
@@ -120,13 +120,13 @@ jobs:
 
   evidence:
     needs: plan
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 45
     permissions:
       contents: read           # no id-token and no secrets: this job runs the PR's code
     steps:
       - name: Check out the PR head
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 0
@@ -147,7 +147,7 @@ jobs:
           echo "QA_BASE_REF=origin/$BASE_REF" >> "$GITHUB_ENV"
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: "3.12"
           cache: "pip"
@@ -156,7 +156,7 @@ jobs:
         run: pip install -r requirements.txt
 
       - name: Get the plan
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: qa-plan
           path: .qa-out
@@ -168,7 +168,7 @@ jobs:
 
       - name: Hand over to the review job
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: qa-evidence
           path: .qa-out/
@@ -179,7 +179,7 @@ jobs:
   review:
     needs: [plan, evidence]
     if: ${{ !cancelled() && needs.plan.result == 'success' }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 25
     permissions:
       contents: read
@@ -201,7 +201,7 @@ jobs:
       AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
     steps:
       - name: Check out the PR head
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 0
@@ -228,14 +228,14 @@ jobs:
       - name: Get the evidence
         id: evidence
         continue-on-error: true
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: qa-evidence
           path: .qa-out
 
       - name: Fall back to the plan if the evidence job produced nothing
         if: steps.evidence.outcome != 'success'
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: qa-plan
           path: .qa-out
@@ -271,7 +271,7 @@ jobs:
 
       - name: Keep the evidence
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: test-quality-evidence
           path: .qa-out/
