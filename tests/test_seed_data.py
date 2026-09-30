@@ -1,3 +1,5 @@
+from datetime import date
+
 from app.extensions import db
 from app.models import Phone
 from app.seed_data import PHONES, seed_if_empty
@@ -39,3 +41,24 @@ def test_seed_data_includes_both_brands(app):
 
 def test_seed_data_entries_are_all_current():
     assert all(p["is_current"] for p in PHONES)
+
+
+def test_seed_data_has_no_duplicate_phones():
+    keys = [(p["brand"], p["model_name"]) for p in PHONES]
+    assert len(keys) == len(set(keys))
+
+
+def test_seed_data_storage_tiers_are_ascending_whole_gb():
+    # Catch typos like "1TB", or out-of-order or repeated tiers, in the hand-edited lists.
+    for p in PHONES:
+        tiers = p["storage_options_gb"].split(",")
+        assert all(t.isdigit() for t in tiers), p["model_name"]
+        sizes = [int(t) for t in tiers]
+        assert sizes == sorted(set(sizes)), p["model_name"]
+
+
+def test_seed_data_has_no_unreleased_phones():
+    # Upcoming phones (e.g. the iPhone Duo, on sale Oct 23, 2026) aren't seeded
+    # as current until they're on sale.
+    unreleased = [p["model_name"] for p in PHONES if p["release_date"] > date.today()]
+    assert unreleased == []

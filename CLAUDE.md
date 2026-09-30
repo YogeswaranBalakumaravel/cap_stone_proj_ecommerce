@@ -59,7 +59,9 @@ duplicating filter logic between the two.
 **Routes**: `/` (catalog, `?brand=`, `?sort=`), `/phone/<id>` (detail, 404 if
 missing), `/api/phones` (same filters as `/`, JSON via `Phone.to_dict()`),
 `/healthz` (used by Render's health check, and by `render.yaml`/`config.py`
-which both assume it exists).
+which both assume it exists). `/compare?ids=a,b` and `/api/compare?ids=a,b` show two phones side
+by side; both use `_compare_phones()` in `routes.py` (400 for bad `ids`, 404 for an
+unknown phone), and `/?compare=<id>` opens the catalog with that phone ticked.
 
 **Seed data** (`app/seed_data.py`): a plain list of `dict(...)` phone records —
 hand-edited, not fetched from any API, and explicitly *not* meant to track real

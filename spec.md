@@ -40,7 +40,7 @@ A small Python/Flask web application that displays current flagship smartphones 
 |---|---|---|
 | `id` | int (PK) | |
 | `brand` | str | `"Apple"` or `"Samsung"` |
-| `model_name` | str | e.g. `"iPhone 17 Pro Max"`, `"Galaxy S26 Ultra"` |
+| `model_name` | str | e.g. `"iPhone 18 Pro Max"`, `"Galaxy S26 Ultra"` |
 | `tier` | str | e.g. `"Pro"`, `"Pro Max"`, `"Ultra"`, `"Plus"`, `"Standard"` |
 | `release_date` | date | |
 | `price_usd` | decimal | Starting price |
@@ -52,9 +52,9 @@ A small Python/Flask web application that displays current flagship smartphones 
 | `image_url` | str | Local static path or external URL |
 | `is_current` | bool | Whether it's an actively sold current-gen flagship |
 
-### Seed data (illustrative, as of Aug 2026)
+### Seed data (illustrative, as of Sep 2026)
 
-**Apple current flagships:** iPhone 17, iPhone 17 Pro, iPhone 17 Pro Max, iPhone Air (iPhone 18 Pro / Pro Max expected fall 2026 — treat as upcoming, not seeded as current).
+**Apple current flagships:** iPhone 17, iPhone Air, iPhone 18 Pro, iPhone 18 Pro Max. Apple stopped selling the iPhone 17 Pro and 17 Pro Max on Sep 9, 2026. The foldable iPhone Duo goes on sale Oct 23, 2026 — treat as upcoming, not seeded as current.
 
 **Samsung current flagships:** Galaxy S26, Galaxy S26+, Galaxy S26 Ultra.
 
