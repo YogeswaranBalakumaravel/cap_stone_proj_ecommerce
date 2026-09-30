@@ -11,3 +11,4 @@ instance/
 *.egg-info/
 .coverage
 htmlcov/
+.qa-out/
