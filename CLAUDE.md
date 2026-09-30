@@ -59,7 +59,9 @@ duplicating filter logic between the two.
 **Routes**: `/` (catalog, `?brand=`, `?sort=`), `/phone/<id>` (detail, 404 if
 missing), `/api/phones` (same filters as `/`, JSON via `Phone.to_dict()`),
 `/healthz` (used by Render's health check, and by `render.yaml`/`config.py`
-which both assume it exists).
+which both assume it exists). `/compare?ids=a,b` and `/api/compare?ids=a,b` show two phones side
+by side; both use `_compare_phones()` in `routes.py` (400 for bad `ids`, 404 for an
+unknown phone), and `/?compare=<id>` opens the catalog with that phone ticked.
 
 **Seed data** (`app/seed_data.py`): a plain list of `dict(...)` phone records —
 hand-edited, not fetched from any API, and explicitly *not* meant to track real
@@ -74,6 +76,19 @@ lint (ruff) → security scan (bandit) → test (pytest), then on push to `main`
 only, triggers a Render deploy hook (skipped if `RENDER_DEPLOY_HOOK_URL` secret
 is unset). There's a commented-out `ai-review` job stubbed in for a future
 non-blocking AI PR review gate — leave it commented unless asked to wire it up.
+
+`.github/workflows/test-quality-agent.yml`: on PRs to `main`, `dev` and `staging`,
+a headless Claude Code agent reviews the tests the PR brings (meaningful? business
+scenarios covered? sunny/rainy days? edge cases? trivial assertions? validates the
+change?). The code lives in `.qa/agent/` (standard-library Python only; see
+`.qa/agent/README.md`). It signs in with the job's GitHub OIDC token, never an API
+key or OAuth token; with the `QA_PROVIDER` repo variable unset it runs its
+scripts-only checks. The workflow loads `.qa/agent/` from the PR's base branch, so
+changes to it take effect only after they merge. It's the mandatory PR gate for
+`main`, `dev` and `staging`: blocking by default (`QA_MODE=advisory` repo variable
+to only comment), and a required status check (**Test quality agent / review**).
+The earlier Mutmut and OSV-Scanner gates were removed; the agent's systematic
+mutants cover mutation testing.
 
 ## Notes / non-goals (v1)
 

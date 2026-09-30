@@ -1,8 +1,8 @@
-"""Seed data for current Apple and Samsung flagship phones (as of Aug 2026).
+"""Seed data for current Apple and Samsung flagship phones (as of Sep 2026).
 
 Specs/prices change frequently -- treat this as a starting point to edit,
-not a maintained live feed. iPhone 18 Pro / Pro Max are expected fall 2026
-and are intentionally not seeded here (upcoming, not current).
+not a maintained live feed. The foldable iPhone Duo goes on sale Oct 23, 2026
+and is intentionally not seeded here yet (upcoming, not current).
 """
 from datetime import date
 
@@ -16,11 +16,11 @@ PHONES = [
         model_name="iPhone 17",
         tier="Standard",
         release_date=date(2025, 9, 19),
-        price_usd=799.0,
+        price_usd=899.0,
         screen_size_in=6.3,
         chip="A19",
         ram_gb=8,
-        storage_options_gb="128,256,512",
+        storage_options_gb="256,512",
         camera_summary="48MP Fusion main + 48MP ultra-wide, 2x optical-quality zoom",
         image_url="images/apple-phone.svg",
         is_current=True,
@@ -30,7 +30,7 @@ PHONES = [
         model_name="iPhone Air",
         tier="Air",
         release_date=date(2025, 9, 19),
-        price_usd=999.0,
+        price_usd=1099.0,
         screen_size_in=6.5,
         chip="A19 Pro",
         ram_gb=8,
@@ -41,29 +41,29 @@ PHONES = [
     ),
     dict(
         brand="Apple",
-        model_name="iPhone 17 Pro",
+        model_name="iPhone 18 Pro",
         tier="Pro",
-        release_date=date(2025, 9, 19),
-        price_usd=1099.0,
+        release_date=date(2026, 9, 18),
+        price_usd=1199.0,
         screen_size_in=6.3,
-        chip="A19 Pro",
-        ram_gb=8,
-        storage_options_gb="256,512,1024",
-        camera_summary="48MP Fusion main, 48MP ultra-wide, 48MP 4x tele, ProRes video",
+        chip="A20 Pro",
+        ram_gb=12,
+        storage_options_gb="256,512,1024,2048",
+        camera_summary="48MP variable-aperture main, 48MP ultra-wide, 48MP 4x tele, ProRes video",
         image_url="images/apple-phone.svg",
         is_current=True,
     ),
     dict(
         brand="Apple",
-        model_name="iPhone 17 Pro Max",
+        model_name="iPhone 18 Pro Max",
         tier="Pro Max",
-        release_date=date(2025, 9, 19),
-        price_usd=1199.0,
+        release_date=date(2026, 9, 18),
+        price_usd=1299.0,
         screen_size_in=6.9,
-        chip="A19 Pro",
-        ram_gb=8,
+        chip="A20 Pro",
+        ram_gb=12,
         storage_options_gb="256,512,1024,2048",
-        camera_summary="48MP Fusion main, 48MP ultra-wide, 48MP 4x tele, largest battery",
+        camera_summary="48MP variable-aperture main, 48MP ultra-wide, 48MP 4x tele, bigger battery",
         image_url="images/apple-phone.svg",
         is_current=True,
     ),
