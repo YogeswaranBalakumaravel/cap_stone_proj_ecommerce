@@ -1,0 +1,152 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "change_type",
+    "summary",
+    "changed_units",
+    "probes"
+  ],
+  "properties": {
+    "change_type": {
+      "type": "string",
+      "enum": [
+        "new_feature",
+        "behaviour_change",
+        "bug_fix",
+        "refactor_only",
+        "tests_only",
+        "non_code"
+      ]
+    },
+    "summary": {
+      "type": "string",
+      "description": "Two sentences at most: what the PR changes in behaviour"
+    },
+    "changed_units": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "file",
+          "line",
+          "name",
+          "kind",
+          "behaviour_changed",
+          "description"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Short id such as U1"
+          },
+          "file": {
+            "type": "string",
+            "description": "Source file path relative to the repository root"
+          },
+          "line": {
+            "type": "integer",
+            "description": "1-based line number in the file at the PR head where the unit starts"
+          },
+          "name": {
+            "type": "string",
+            "description": "Function, method, route or class name"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "new",
+              "modified",
+              "deleted"
+            ]
+          },
+          "behaviour_changed": {
+            "type": "boolean",
+            "description": "False for pure refactors, renames or formatting"
+          },
+          "description": {
+            "type": "string",
+            "description": "What changed in its behaviour"
+          }
+        }
+      }
+    },
+    "probes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "unit_id",
+          "file",
+          "line",
+          "original",
+          "replacement",
+          "category",
+          "rationale",
+          "related_criteria",
+          "suggested_tests"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Short id such as P1"
+          },
+          "unit_id": {
+            "type": "string",
+            "description": "The changed unit this probe targets"
+          },
+          "file": {
+            "type": "string",
+            "description": "Source file changed in this PR"
+          },
+          "line": {
+            "type": "integer",
+            "description": "1-based line number in the file at the PR head containing the original text"
+          },
+          "original": {
+            "type": "string",
+            "description": "Exact text copied from that line, appearing once on it"
+          },
+          "replacement": {
+            "type": "string",
+            "description": "Minimal edit; no new identifiers, calls or imports"
+          },
+          "category": {
+            "type": "string",
+            "enum": [
+              "business_rule",
+              "boundary",
+              "error_path",
+              "condition",
+              "return_value",
+              "integration_contract"
+            ]
+          },
+          "rationale": {
+            "type": "string",
+            "description": "One sentence: the behaviour this breaks and what a good test would observe"
+          },
+          "related_criteria": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Acceptance-criterion ids, or empty"
+          },
+          "suggested_tests": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Test file paths most likely to catch it, or empty"
+          }
+        }
+      },
+      "description": "At most the configured number of probes"
+    }
+  }
+}
