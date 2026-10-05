@@ -1,0 +1,108 @@
+{
+  "mode": "blocking",
+  "fail_closed": false,
+  "checklist": {
+    "source": "Checklist for AI-Assisted Applications, Stream A (Confluence, DA space)",
+    "url": "https://celestialsys.atlassian.net/wiki/spaces/DA/pages/3846176779"
+  },
+  "checks": {
+    "dependency_hygiene":        {"title": "Dependency hygiene",                               "row": "BLOCKING", "aliases": ["deps", "dependencies"]},
+    "plausible_logic":           {"title": "Plausible-but-wrong logic",                        "row": "BLOCKING", "aliases": ["logic"], "human_attestation": true},
+    "requirement_coverage":      {"title": "Requirement coverage",                             "row": "BLOCKING", "aliases": ["requirements", "coverage"]},
+    "error_handling":            {"title": "Error handling",                                   "row": "STANDARD", "aliases": ["errors"]},
+    "scope_creep":               {"title": "Scope creep",                                      "row": "ADVISORY", "aliases": ["scope"], "human_attestation": true},
+    "duplication_drift":         {"title": "Code duplication and drift",                       "row": "STANDARD", "aliases": ["duplication", "drift"]},
+    "llm_antipatterns":          {"title": "LLM-typical anti-patterns",                        "row": "BLOCKING", "aliases": ["antipatterns", "anti-patterns"]},
+    "injection_surfaces":        {"title": "Injection surfaces",                               "row": "BLOCKING", "aliases": ["injection"]},
+    "assertions_never_fail":     {"title": "Assertions that can never fail",                   "row": "BLOCKING", "aliases": ["assertions"]},
+    "tests_assert_requirements": {"title": "Tests assert requirements, not the implementation", "row": "BLOCKING", "aliases": ["tests"], "human_attestation": true}
+  },
+  "attestation": {
+    "keyword": "attest:",
+    "require_approval": true,
+    "require_same_commit": true,
+    "require_write_permission": true,
+    "always_required": []
+  },
+  "paths": {
+    "exclude_globs": [
+      ".qa/*", ".github/*", ".claude/*", "instance/*", "migrations/*", "*/migrations/*", "docs/*",
+      "*.min.js", "*.min.css", "*.map", "*.lock", "package-lock.json", "yarn.lock", "pnpm-lock.yaml",
+      "*.svg", "*.png", "*.jpg", "*.jpeg", "*.gif", "*.webp", "*.ico", "*.woff", "*.woff2", "*.md"
+    ],
+    "test_globs": [
+      "tests/*", "*/tests/*", "test_*.py", "*/test_*.py", "*_test.py", "conftest.py", "*/conftest.py",
+      "*.test.*", "*.spec.*", "__tests__/*", "*/__tests__/*"
+    ],
+    "frontend_globs": [
+      "app/templates/*", "app/static/*", "templates/*", "static/*", "frontend/*", "src/*",
+      "*.html", "*.htm", "*.jinja", "*.jinja2", "*.j2",
+      "*.js", "*.mjs", "*.cjs", "*.ts", "*.jsx", "*.tsx", "*.vue", "*.svelte",
+      "*.css", "*.scss", "*.sass", "*.less"
+    ],
+    "backend_globs": [
+      "*.py", "*.sql", "requirements*.txt", "pyproject.toml", "package.json", "render.yaml",
+      "Dockerfile", "Procfile"
+    ],
+    "template_dirs": ["app/templates", "templates"]
+  },
+  "requirements": {
+    "ac_heading_regex": "acceptance criteria|business scenarios|business rules",
+    "scope_heading_regex": "^scope$|files in scope|declared paths",
+    "jira_key_regex": "[A-Z][A-Z0-9]+-[0-9]+",
+    "jira_ac_field": "",
+    "files": [],
+    "require": false
+  },
+  "dependencies": {
+    "registry_checks": true,
+    "osv_checks": true,
+    "network_timeout_seconds": 15,
+    "not_imported_ok": ["gunicorn", "uvicorn", "pytest", "pytest-cov", "ruff", "bandit", "black", "mypy",
+                         "coverage", "pip-tools", "wheel", "setuptools", "pre-commit", "psycopg2",
+                         "psycopg2-binary", "python-dotenv", "waitress"],
+    "import_names": {
+      "flask-sqlalchemy": "flask_sqlalchemy", "pyyaml": "yaml", "beautifulsoup4": "bs4",
+      "python-dotenv": "dotenv", "pillow": "PIL", "scikit-learn": "sklearn", "flask-wtf": "flask_wtf",
+      "flask-cors": "flask_cors", "flask-login": "flask_login", "flask-migrate": "flask_migrate",
+      "python-dateutil": "dateutil", "pyjwt": "jwt", "opencv-python": "cv2", "attrs": "attr",
+      "msgpack-python": "msgpack", "google-cloud-storage": "google", "protobuf": "google"
+    },
+    "transitive": {
+      "flask": ["werkzeug", "jinja2", "markupsafe", "itsdangerous", "click", "blinker"],
+      "flask-sqlalchemy": ["sqlalchemy"],
+      "requests": ["urllib3", "idna", "certifi", "charset_normalizer"]
+    }
+  },
+  "architecture": {
+    "contracts": [
+      {"name": "Models don't depend on routes", "source": "app.models", "forbidden": ["app.routes"]},
+      {"name": "Extensions stay dependency-free", "source": "app.extensions", "forbidden": ["app.models", "app.routes", "app.seed_data"]},
+      {"name": "Seed data doesn't depend on routes", "source": "app.seed_data", "forbidden": ["app.routes"]}
+    ]
+  },
+  "duplication": {
+    "min_block_lines": 6,
+    "function_similarity": 0.85,
+    "min_function_lines": 5
+  },
+  "scope": {
+    "max_changed_lines": 400,
+    "new_endpoint_label": "new-endpoint"
+  },
+  "context_files": ["CLAUDE.md", "AGENTS.md", "spec.md", ".claude/skills/python-coding-standard/SKILL.md"],
+  "agent": {
+    "provider": "none",
+    "model": "",
+    "use_json_schema": true,
+    "max_turns": {"understand": 30, "oracle": 1, "review": 45},
+    "max_budget_usd": {"understand": 3, "oracle": 1, "review": 5},
+    "timeout_seconds": 1200,
+    "max_diff_chars": 150000
+  },
+  "review": {
+    "line_tolerance": 3,
+    "max_findings": 60,
+    "max_annotations": 20
+  }
+}

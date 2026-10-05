@@ -1,0 +1,188 @@
+# Code review agent: reviews the frontend, backend and test code of every PR against the ten
+# Stream A checks of the "Checklist for AI-Assisted Applications" (Confluence, DA space).
+#
+#   1. collect.py              the ask (PR, criteria, Jira), a map of the existing code, the change,
+#                              and the ten deterministic checks
+#   2. run_passes.py understand  agent: cited map of the existing system, the ask, the implementation
+#      run_passes.py oracle      agent, separate context: criteria + signatures only, no tools
+#      run_passes.py review      agent: the ten checks, with the understanding and the oracle
+#   3. gate.py                 verifies every citation, applies attestations, decides, reports
+#
+# Nothing here runs the PR's code, which is why one job can hold the OIDC token. Sign-in is shared
+# with the test quality agent (QA_PROVIDER: anthropic | bedrock | vertex | foundry | none); no API
+# keys, no OAuth tokens. With none, the deterministic checks still run and can still block.
+#
+# Named human attestation: a reviewer with write access (not the author) approves the PR with a
+# line such as "attest: logic, tests". The review event re-runs only the gate on the stored
+# evidence, so attesting costs no agent time.
+name: Code review agent
+
+on:
+  pull_request:
+    branches: [main, dev, staging]
+    types: [opened, synchronize, reopened, ready_for_review, labeled, unlabeled, edited]
+  pull_request_review:
+    types: [submitted, dismissed]
+  workflow_dispatch:     # Run workflow: report-only audit of the whole project on a branch
+
+permissions: {}
+
+concurrency:
+  group: code-review-${{ github.event.pull_request.number || github.ref }}-${{ github.event_name }}
+  cancel-in-progress: true
+
+env:
+  CR_OUT: .cr-out
+  CODE_REVIEW_MODE: ${{ vars.CODE_REVIEW_MODE }}   # blocking (default) or advisory
+  QA_PROVIDER: ${{ vars.QA_PROVIDER }}             # shared with the test quality agent
+  QA_MODEL: ${{ vars.QA_MODEL }}
+  CLAUDE_CODE_VERSION: latest                      # pin an exact version for reproducible runs
+  CR_FULL_AUDIT: ${{ github.event_name == 'workflow_dispatch' && '1' || '' }}
+
+jobs:
+  review:
+    if: >-
+      github.event_name == 'workflow_dispatch' || (
+        github.event.pull_request.draft == false &&
+        github.event.pull_request.head.repo.full_name == github.repository &&
+        contains(fromJSON('["main","dev","staging"]'), github.event.pull_request.base.ref))
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      actions: read            # the review event fetches the evidence of the earlier run
+      pull-requests: write     # PR comment, and reading reviews for attestations
+      id-token: write          # short-lived OIDC token for the agent; nothing is stored
+    env:
+      HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+      PR_NUMBER: ${{ github.event.pull_request.number }}
+      PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+      ANTHROPIC_FEDERATION_RULE_ID: ${{ vars.ANTHROPIC_FEDERATION_RULE_ID }}
+      ANTHROPIC_ORGANIZATION_ID: ${{ vars.ANTHROPIC_ORGANIZATION_ID }}
+      ANTHROPIC_SERVICE_ACCOUNT_ID: ${{ vars.ANTHROPIC_SERVICE_ACCOUNT_ID }}
+      ANTHROPIC_WORKSPACE_ID: ${{ vars.ANTHROPIC_WORKSPACE_ID }}
+      AWS_ROLE_ARN: ${{ vars.AWS_ROLE_ARN }}
+      AWS_REGION: ${{ vars.AWS_REGION }}
+      ANTHROPIC_VERTEX_PROJECT_ID: ${{ vars.ANTHROPIC_VERTEX_PROJECT_ID }}
+      CLOUD_ML_REGION: ${{ vars.CLOUD_ML_REGION }}
+      GCP_WORKLOAD_IDENTITY_PROVIDER: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+      GCP_SERVICE_ACCOUNT: ${{ vars.GCP_SERVICE_ACCOUNT }}
+      ANTHROPIC_FOUNDRY_RESOURCE: ${{ vars.ANTHROPIC_FOUNDRY_RESOURCE }}
+      AZURE_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
+      AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+    steps:
+      - name: Check out the PR head
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ env.HEAD_SHA }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Load the review agent from the base branch
+        # Prompts, checks, thresholds and the shared sign-in come from the target branch, so a PR
+        # can't soften its own review. Protect .qa/ with CODEOWNERS as well.
+        env:
+          BASE_REF: ${{ github.event.pull_request.base.ref || github.ref_name }}
+        run: |
+          QA_ROOT="$RUNNER_TEMP/qa"
+          mkdir -p "$QA_ROOT"
+          if git cat-file -e "origin/$BASE_REF:.qa/code-review/gate.py" 2>/dev/null; then
+            git archive "origin/$BASE_REF" .qa/code-review .qa/agent | tar -x -C "$QA_ROOT"
+          else
+            echo "::warning::.qa/code-review isn't on $BASE_REF yet, so this run uses the PR's copy."
+            mkdir -p "$QA_ROOT/.qa" && cp -R .qa/code-review .qa/agent "$QA_ROOT/.qa/"
+          fi
+          echo "CR_HOME=$QA_ROOT/.qa/code-review" >> "$GITHUB_ENV"
+          echo "QA_AGENT_HOME=$QA_ROOT/.qa/agent" >> "$GITHUB_ENV"
+          echo "CR_BASE_REF=origin/$BASE_REF" >> "$GITHUB_ENV"
+
+      - name: Reuse the evidence of this commit (review events)
+        id: reuse
+        if: github.event_name == 'pull_request_review'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          id=$(gh run list --workflow code-review-agent.yml --commit "$HEAD_SHA" --event pull_request \
+                 --status completed --limit 1 --json databaseId --jq '.[0].databaseId')
+          if [ -n "$id" ] && gh run download "$id" -n code-review-evidence -D .cr-out; then
+            echo "found=true" >> "$GITHUB_OUTPUT"
+            echo "Re-deciding with the evidence of run $id."
+          else
+            echo "No earlier evidence for $HEAD_SHA; running the full review."
+          fi
+
+      - name: Install Claude Code
+        if: steps.reuse.outputs.found != 'true' && env.QA_PROVIDER != '' && env.QA_PROVIDER != 'none'
+        run: npm install -g "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}"
+
+      - name: 1. Understand the PR and run the ten checks
+        if: steps.reuse.outputs.found != 'true'
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title || format('Full-project audit of {0}', github.ref_name) }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+          PR_LABELS: ${{ toJSON(github.event.pull_request.labels.*.name) }}
+          HEAD_REF: ${{ github.event.pull_request.head.ref || github.ref_name }}
+          JIRA_BASE_URL: ${{ vars.JIRA_BASE_URL }}
+          JIRA_EMAIL: ${{ vars.JIRA_EMAIL }}
+          JIRA_API_TOKEN: ${{ secrets.JIRA_API_TOKEN }}
+        run: python3 "$CR_HOME/collect.py"
+
+      - name: 2a. Agent maps the existing code, the ask and the implementation
+        if: steps.reuse.outputs.found != 'true'
+        continue-on-error: true
+        run: python3 "$CR_HOME/run_passes.py" understand
+
+      - name: 2b. Agent writes the test oracle in a separate context
+        if: steps.reuse.outputs.found != 'true'
+        continue-on-error: true
+        run: python3 "$CR_HOME/run_passes.py" oracle
+
+      - name: 2c. Agent reviews the ten checks
+        if: steps.reuse.outputs.found != 'true'
+        continue-on-error: true
+        run: python3 "$CR_HOME/run_passes.py" review
+
+      - name: 3. Gate
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 "$CR_HOME/gate.py" || true   # the exit code is enforced in the last step
+
+      - name: Post the report
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          [ -f .cr-out/report.md ] || { echo "No report to post."; exit 0; }
+          cat .cr-out/report.md >> "$GITHUB_STEP_SUMMARY"
+          [ -n "$PR_NUMBER" ] || { echo "Manual run: the report is in the run summary."; exit 0; }
+          marker='<!-- code-review-agent -->'
+          id=$(gh api "repos/$GH_REPO/issues/$PR_NUMBER/comments" --paginate \
+                 --jq ".[] | select(.body | contains(\"$marker\")) | .id" | tail -n 1)
+          if [ -n "$id" ]; then
+            gh api -X PATCH "repos/$GH_REPO/issues/comments/$id" -F body=@.cr-out/report.md > /dev/null
+          else
+            gh pr comment "$PR_NUMBER" --body-file .cr-out/report.md
+          fi
+
+      - name: Keep the evidence
+        if: always() && github.event_name != 'pull_request_review'
+        uses: actions/upload-artifact@v7
+        with:
+          name: code-review-evidence
+          path: .cr-out/
+          include-hidden-files: true
+          retention-days: 30
+          overwrite: true
+
+      - name: Enforce the gate
+        if: always()
+        run: |
+          code=$(cat .cr-out/gate_exit_code 2>/dev/null || echo missing)
+          if [ "$code" = "missing" ]; then
+            echo "::error::The gate didn't produce a result."
+            exit 1
+          fi
+          exit "$code"
