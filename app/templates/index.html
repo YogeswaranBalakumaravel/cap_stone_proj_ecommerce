@@ -24,19 +24,69 @@
   {% if phones %}
   <div class="card-grid">
     {% for phone in phones %}
-      <a class="phone-card" href="{{ url_for('main.detail', phone_id=phone.id) }}">
-        <div class="card-image brand-{{ phone.brand|lower }}">
-          <img src="{{ url_for('static', filename=phone.image_url) }}" alt="{{ phone.model_name }}">
-        </div>
-        <div class="card-body">
-          <span class="badge tier-badge">{{ phone.tier }}</span>
-          <h3 class="card-title">{{ phone.model_name }}</h3>
-          <p class="card-brand">{{ phone.brand }}</p>
-          <p class="card-price">${{ '{:,.0f}'.format(phone.price_usd) }}</p>
-        </div>
-      </a>
+      <div class="phone-card">
+        <a class="card-link" href="{{ url_for('main.detail', phone_id=phone.id) }}">
+          <div class="card-image brand-{{ phone.brand|lower }}">
+            <img src="{{ url_for('static', filename=phone.image_url) }}" alt="{{ phone.model_name }}">
+          </div>
+          <div class="card-body">
+            <span class="badge tier-badge">{{ phone.tier }}</span>
+            <h3 class="card-title">{{ phone.model_name }}</h3>
+            <p class="card-brand">{{ phone.brand }}</p>
+            <p class="card-price">${{ '{:,.0f}'.format(phone.price_usd) }}</p>
+          </div>
+        </a>
+        <label class="compare-toggle">
+          <input type="checkbox" class="compare-box" value="{{ phone.id }}"
+                 {{ 'checked' if phone.id == preselected_id else '' }}>
+          Compare
+        </label>
+      </div>
     {% endfor %}
   </div>
+
+  <div class="compare-bar" id="compare-bar" hidden>
+    <span class="compare-hint" id="compare-hint" aria-live="polite"></span>
+    <a class="compare-button" id="compare-button" href="{{ url_for('main.compare') }}" hidden>Compare (2)</a>
+  </div>
+
+  <script>
+    // Tick exactly two phones to compare; the order you tick them is the order shown.
+    (function () {
+      var boxes = Array.prototype.slice.call(document.querySelectorAll(".compare-box"));
+      var bar = document.getElementById("compare-bar");
+      var hint = document.getElementById("compare-hint");
+      var button = document.getElementById("compare-button");
+      var base = button.getAttribute("href");
+      var order = boxes.filter(function (b) { return b.checked; }).map(function (b) { return b.value; });
+
+      function render(message) {
+        bar.hidden = order.length === 0 && !message;
+        button.hidden = order.length !== 2;
+        // review: ignore[INJ002] order holds only .compare-box values, which are server-rendered phone IDs
+        button.setAttribute("href", base + "?ids=" + order.join(","));
+        hint.textContent = message ||
+          (order.length === 1 ? "Pick one more phone to compare." : "");
+      }
+
+      boxes.forEach(function (box) {
+        box.addEventListener("change", function () {
+          if (box.checked) {
+            if (order.length >= 2) {
+              box.checked = false;
+              render("You can compare two phones at a time. Untick one first.");
+              return;
+            }
+            order.push(box.value);
+          } else {
+            order = order.filter(function (id) { return id !== box.value; });
+          }
+          render("");
+        });
+      });
+      render("");
+    })();
+  </script>
   {% else %}
     <p class="empty-state">No phones match this filter.</p>
   {% endif %}

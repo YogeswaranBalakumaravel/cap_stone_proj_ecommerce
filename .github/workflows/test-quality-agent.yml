@@ -1,0 +1,290 @@
+# Test quality agent: a headless Claude Code agent that reviews the unit and integration tests in every PR.
+#
+# No API keys and no OAuth tokens. The agent signs in with this job's short-lived GitHub OIDC identity,
+# through the provider named in the repository variable QA_PROVIDER:
+#   anthropic | bedrock | vertex | foundry | none (default: scripts only, no agent)
+# Provider IDs are repository variables, not secrets. See .qa/agent/README.md for the setup of each.
+#
+#   plan      collect context, agent designs probes              can mint OIDC tokens, never runs PR code
+#   evidence  your tests: baseline, coverage, change reverted,   runs PR code, has no credentials at all
+#             agent probes, systematic mutants
+#   review    agent answers the six questions, gate decides,     can mint OIDC tokens, never runs PR code
+#             PR comment
+#
+# QA tooling uses only the Python standard library, git and the Claude Code CLI.
+name: Test quality agent
+
+on:
+  pull_request:
+    branches: [main, dev, staging]   # same branches as the other PR gates
+    types: [opened, synchronize, reopened, ready_for_review]
+  # Actions > Test quality agent > Run workflow: audit the whole project on the chosen branch,
+  # as if every file were new. The report goes to the run summary instead of a PR comment.
+  workflow_dispatch:
+
+permissions: {}   # each job asks for exactly what it needs
+
+concurrency:
+  group: test-quality-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  QA_OUT: .qa-out
+  QA_MODE: ${{ vars.QA_MODE }}            # blocking (default) or advisory
+  QA_PROVIDER: ${{ vars.QA_PROVIDER }}    # anthropic, bedrock, vertex, foundry, or none (default)
+  QA_MODEL: ${{ vars.QA_MODEL }}          # optional; required for foundry (the deployment name)
+  CLAUDE_CODE_VERSION: latest             # pin an exact version for reproducible runs
+  # Manual runs audit the whole project and try more systematic mutants.
+  QA_FULL_AUDIT: ${{ github.event_name == 'workflow_dispatch' && '1' || '' }}
+  QA_SYSTEMATIC_MAX: ${{ github.event_name == 'workflow_dispatch' && '60' || '' }}
+
+jobs:
+  plan:
+    # Same-repository PRs only. Fork PRs can't request OIDC tokens for this repository.
+    if: >-
+      github.event_name == 'workflow_dispatch' || (
+        github.event.pull_request.draft == false &&
+        github.event.pull_request.head.repo.full_name == github.repository)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      id-token: write          # short-lived OIDC token for the agent; nothing is stored
+    env:
+      # Provider settings: repository variables, none of them secret. Only the chosen provider's are used.
+      ANTHROPIC_FEDERATION_RULE_ID: ${{ vars.ANTHROPIC_FEDERATION_RULE_ID }}
+      ANTHROPIC_ORGANIZATION_ID: ${{ vars.ANTHROPIC_ORGANIZATION_ID }}
+      ANTHROPIC_SERVICE_ACCOUNT_ID: ${{ vars.ANTHROPIC_SERVICE_ACCOUNT_ID }}
+      ANTHROPIC_WORKSPACE_ID: ${{ vars.ANTHROPIC_WORKSPACE_ID }}
+      AWS_ROLE_ARN: ${{ vars.AWS_ROLE_ARN }}
+      AWS_REGION: ${{ vars.AWS_REGION }}
+      ANTHROPIC_VERTEX_PROJECT_ID: ${{ vars.ANTHROPIC_VERTEX_PROJECT_ID }}
+      CLOUD_ML_REGION: ${{ vars.CLOUD_ML_REGION }}
+      GCP_WORKLOAD_IDENTITY_PROVIDER: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+      GCP_SERVICE_ACCOUNT: ${{ vars.GCP_SERVICE_ACCOUNT }}
+      ANTHROPIC_FOUNDRY_RESOURCE: ${{ vars.ANTHROPIC_FOUNDRY_RESOURCE }}
+      AZURE_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
+      AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+    steps:
+      - name: Check out the PR head
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+
+      - name: Load the QA agent from the base branch
+        # Prompts, schemas, thresholds and scripts come from the target branch, so a PR
+        # can't soften its own review. Also protect .qa/ with CODEOWNERS.
+        env:
+          BASE_REF: ${{ github.base_ref || github.ref_name }}
+        run: |
+          QA_ROOT="$RUNNER_TEMP/qa"
+          mkdir -p "$QA_ROOT"
+          if git cat-file -e "origin/$BASE_REF:.qa/agent/gate.py" 2>/dev/null; then
+            git archive "origin/$BASE_REF" .qa/agent | tar -x -C "$QA_ROOT"
+          else
+            echo "::warning::.qa/agent isn't on $BASE_REF yet, so this run uses the PR's copy."
+            mkdir -p "$QA_ROOT/.qa" && cp -R .qa/agent "$QA_ROOT/.qa/"
+          fi
+          echo "QA_HOME=$QA_ROOT/.qa/agent" >> "$GITHUB_ENV"
+          echo "QA_BASE_REF=origin/$BASE_REF" >> "$GITHUB_ENV"
+
+      - name: Install Claude Code
+        if: env.QA_PROVIDER != '' && env.QA_PROVIDER != 'none'
+        run: npm install -g "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}"
+
+      - name: 1. Collect PR context
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_TITLE: ${{ github.event.pull_request.title || format('Full-project audit of {0}', github.ref_name) }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+          HEAD_REF: ${{ github.head_ref || github.ref_name }}
+          # Optional: read acceptance criteria from the Jira key in the branch name or PR title.
+          JIRA_BASE_URL: ${{ vars.JIRA_BASE_URL }}
+          JIRA_EMAIL: ${{ vars.JIRA_EMAIL }}
+          JIRA_API_TOKEN: ${{ secrets.JIRA_API_TOKEN }}
+        run: python3 "$QA_HOME/collect_context.py"
+
+      - name: 2. Agent designs probes
+        continue-on-error: true
+        run: python3 "$QA_HOME/run_agent.py" plan
+
+      - name: Hand over to the evidence job
+        uses: actions/upload-artifact@v7
+        with:
+          name: qa-plan
+          path: .qa-out/
+          include-hidden-files: true
+          retention-days: 1
+          overwrite: true
+
+  evidence:
+    needs: plan
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    permissions:
+      contents: read           # no id-token and no secrets: this job runs the PR's code
+    steps:
+      - name: Check out the PR head
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+
+      - name: Load the QA agent from the base branch
+        env:
+          BASE_REF: ${{ github.base_ref || github.ref_name }}
+        run: |
+          QA_ROOT="$RUNNER_TEMP/qa"
+          mkdir -p "$QA_ROOT"
+          if git cat-file -e "origin/$BASE_REF:.qa/agent/gate.py" 2>/dev/null; then
+            git archive "origin/$BASE_REF" .qa/agent | tar -x -C "$QA_ROOT"
+          else
+            echo "::warning::.qa/agent isn't on $BASE_REF yet, so this run uses the PR's copy."
+            mkdir -p "$QA_ROOT/.qa" && cp -R .qa/agent "$QA_ROOT/.qa/"
+          fi
+          echo "QA_HOME=$QA_ROOT/.qa/agent" >> "$GITHUB_ENV"
+          echo "QA_BASE_REF=origin/$BASE_REF" >> "$GITHUB_ENV"
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Get the plan
+        uses: actions/download-artifact@v8
+        with:
+          name: qa-plan
+          path: .qa-out
+
+      - name: 3. Run the evidence checks with the project's tests
+        continue-on-error: true
+        timeout-minutes: 40
+        run: python3 "$QA_HOME/run_probes.py"
+
+      - name: Hand over to the review job
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: qa-evidence
+          path: .qa-out/
+          include-hidden-files: true
+          retention-days: 1
+          overwrite: true
+
+  review:
+    needs: [plan, evidence]
+    if: ${{ !cancelled() && needs.plan.result == 'success' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    permissions:
+      contents: read
+      pull-requests: write     # the PR comment
+      id-token: write          # short-lived OIDC token for the agent; nothing is stored
+    env:
+      ANTHROPIC_FEDERATION_RULE_ID: ${{ vars.ANTHROPIC_FEDERATION_RULE_ID }}
+      ANTHROPIC_ORGANIZATION_ID: ${{ vars.ANTHROPIC_ORGANIZATION_ID }}
+      ANTHROPIC_SERVICE_ACCOUNT_ID: ${{ vars.ANTHROPIC_SERVICE_ACCOUNT_ID }}
+      ANTHROPIC_WORKSPACE_ID: ${{ vars.ANTHROPIC_WORKSPACE_ID }}
+      AWS_ROLE_ARN: ${{ vars.AWS_ROLE_ARN }}
+      AWS_REGION: ${{ vars.AWS_REGION }}
+      ANTHROPIC_VERTEX_PROJECT_ID: ${{ vars.ANTHROPIC_VERTEX_PROJECT_ID }}
+      CLOUD_ML_REGION: ${{ vars.CLOUD_ML_REGION }}
+      GCP_WORKLOAD_IDENTITY_PROVIDER: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+      GCP_SERVICE_ACCOUNT: ${{ vars.GCP_SERVICE_ACCOUNT }}
+      ANTHROPIC_FOUNDRY_RESOURCE: ${{ vars.ANTHROPIC_FOUNDRY_RESOURCE }}
+      AZURE_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
+      AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+    steps:
+      - name: Check out the PR head
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+
+      - name: Load the QA agent from the base branch
+        env:
+          BASE_REF: ${{ github.base_ref || github.ref_name }}
+        run: |
+          QA_ROOT="$RUNNER_TEMP/qa"
+          mkdir -p "$QA_ROOT"
+          if git cat-file -e "origin/$BASE_REF:.qa/agent/gate.py" 2>/dev/null; then
+            git archive "origin/$BASE_REF" .qa/agent | tar -x -C "$QA_ROOT"
+          else
+            echo "::warning::.qa/agent isn't on $BASE_REF yet, so this run uses the PR's copy."
+            mkdir -p "$QA_ROOT/.qa" && cp -R .qa/agent "$QA_ROOT/.qa/"
+          fi
+          echo "QA_HOME=$QA_ROOT/.qa/agent" >> "$GITHUB_ENV"
+          echo "QA_BASE_REF=origin/$BASE_REF" >> "$GITHUB_ENV"
+
+      - name: Install Claude Code
+        if: env.QA_PROVIDER != '' && env.QA_PROVIDER != 'none'
+        run: npm install -g "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}"
+
+      - name: Get the evidence
+        id: evidence
+        continue-on-error: true
+        uses: actions/download-artifact@v8
+        with:
+          name: qa-evidence
+          path: .qa-out
+
+      - name: Fall back to the plan if the evidence job produced nothing
+        if: steps.evidence.outcome != 'success'
+        uses: actions/download-artifact@v8
+        with:
+          name: qa-plan
+          path: .qa-out
+
+      - name: 4. Agent reviews the tests
+        continue-on-error: true
+        run: python3 "$QA_HOME/run_agent.py" review
+
+      - name: 5. Gate
+        if: always()
+        env:
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: python3 "$QA_HOME/gate.py"
+
+      - name: Post the report
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          [ -f .qa-out/report.md ] || { echo "No report to post."; exit 0; }
+          cat .qa-out/report.md >> "$GITHUB_STEP_SUMMARY"
+          [ -n "$PR_NUMBER" ] || { echo "Manual run: the report is in the run summary."; exit 0; }
+          marker='<!-- test-quality-agent -->'
+          id=$(gh api "repos/$GH_REPO/issues/$PR_NUMBER/comments" --paginate \
+                 --jq ".[] | select(.body | contains(\"$marker\")) | .id" | tail -n 1)
+          if [ -n "$id" ]; then
+            gh api -X PATCH "repos/$GH_REPO/issues/comments/$id" -F body=@.qa-out/report.md > /dev/null
+          else
+            gh pr comment "$PR_NUMBER" --body-file .qa-out/report.md
+          fi
+
+      - name: Keep the evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: test-quality-evidence
+          path: .qa-out/
+          include-hidden-files: true
+          retention-days: 30
+          overwrite: true
+
+      - name: Enforce the gate
+        if: always()
+        run: |
+          code=$(cat .qa-out/gate_exit_code 2>/dev/null || echo missing)
+          if [ "$code" = "missing" ]; then
+            echo "::error::The gate didn't produce a result."
+            exit 1
+          fi
+          exit "$code"

@@ -51,6 +51,15 @@ def test_api_phones_sort_by_price_is_ascending(client):
     assert prices == sorted(prices)
 
 
+def test_api_phones_default_sort_is_brand_then_price_descending(client):
+    # No ?sort= given -> falls into _query_phones' else branch: brand
+    # ascending, then price descending within each brand.
+    resp = client.get("/api/phones")
+    data = resp.get_json()
+    keys = [(p["brand"], -p["price_usd"]) for p in data]
+    assert keys == sorted(keys)
+
+
 def test_api_phones_sort_by_release_date_is_descending(client):
     resp = client.get("/api/phones?sort=release_date")
     data = resp.get_json()
@@ -98,3 +107,60 @@ def test_healthz_returns_200(client):
     resp = client.get("/healthz")
     assert resp.status_code == 200
     assert resp.get_json() == {"status": "ok"}
+
+
+def test_api_phones_apple_lineup_matches_apple_store(client):
+    # Sep 2026: iPhone 18 Pro and Pro Max added, iPhone 17 Pro and Pro Max
+    # discontinued, iPhone 17 and Air up $100. Default sort: price descending.
+    data = client.get("/api/phones?brand=Apple").get_json()
+    assert [(p["model_name"], p["price_usd"]) for p in data] == [
+        ("iPhone 18 Pro Max", 1299.0),
+        ("iPhone 18 Pro", 1199.0),
+        ("iPhone Air", 1099.0),
+        ("iPhone 17", 899.0),
+    ]
+
+
+def test_api_phones_iphone_18_pro_models_have_launch_specs(client):
+    phones = {p["model_name"]: p for p in client.get("/api/phones?brand=Apple").get_json()}
+    for name, tier, screen_size in (
+        ("iPhone 18 Pro", "Pro", 6.3),
+        ("iPhone 18 Pro Max", "Pro Max", 6.9),
+    ):
+        phone = phones[name]
+        assert phone["tier"] == tier
+        assert phone["screen_size_in"] == screen_size
+        assert phone["chip"] == "A20 Pro"
+        assert phone["ram_gb"] == 12
+        assert phone["release_date"] == "2026-09-18"
+        assert phone["storage_options_gb"] == ["256", "512", "1024", "2048"]
+        assert phone["is_current"] is True
+
+
+def test_api_phones_iphone_17_starts_at_256gb(client):
+    phones = {p["model_name"]: p for p in client.get("/api/phones?brand=Apple").get_json()}
+    assert phones["iPhone 17"]["storage_options_gb"] == ["256", "512"]
+
+
+def test_api_phones_newest_first_starts_with_iphone_18_pro_models(client):
+    data = client.get("/api/phones?sort=release_date").get_json()
+    assert {p["model_name"] for p in data[:2]} == {"iPhone 18 Pro", "iPhone 18 Pro Max"}
+    assert max(p["release_date"] for p in data[2:]) < "2026-09-18"
+
+
+def test_index_no_longer_lists_discontinued_iphone_17_pro_models(client):
+    body = client.get("/?brand=Apple").get_data(as_text=True)
+    assert "iPhone 18 Pro Max" in body
+    assert "iPhone 17 Pro" not in body
+
+
+def test_detail_shows_iphone_18_pro_max_specs(app, client):
+    with app.app_context():
+        phone_id = Phone.query.filter_by(model_name="iPhone 18 Pro Max").one().id
+
+    body = client.get(f"/phone/{phone_id}").get_data(as_text=True)
+    assert "iPhone 18 Pro Max" in body
+    assert "$1,299" in body
+    assert "A20 Pro" in body
+    assert "256 GB, 512 GB, 1024 GB, 2048 GB" in body
+    assert "Current flagship" in body
