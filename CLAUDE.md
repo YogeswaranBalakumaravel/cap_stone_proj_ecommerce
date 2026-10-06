@@ -90,6 +90,16 @@ to only comment), and a required status check (**Test quality agent / review**).
 The earlier Mutmut and OSV-Scanner gates were removed; the agent's systematic
 mutants cover mutation testing.
 
+`.github/workflows/code-review-agent.yml`: on PRs to `main`, `dev` and `staging`, a code
+review agent checks the PR's backend, frontend and test code against the ten Stream A checks
+of the *Checklist for AI-Assisted Applications*. The code lives in `.qa/code-review/` (standard
+library only; see `.qa/code-review/README.md`). It reuses the test quality agent's OIDC sign-in
+from `.qa/agent/` and the same `QA_PROVIDER`; with that unset, its deterministic checks still
+run and can still block. It loads from the PR's base branch too. Only lines the PR adds can block;
+judgement calls wait for a reviewer (not the author) to approve with `attest: <check>`.
+`CODE_REVIEW_MODE=advisory` makes it comment-only. Its job is `code-review`, not `review`, so it
+doesn't share a required-check name with the test quality agent.
+
 ## Notes / non-goals (v1)
 
 No auth/accounts/reviews, no live price-tracking/scraping, no purchase flow —
