@@ -40,7 +40,9 @@ env:
   CR_FULL_AUDIT: ${{ github.event_name == 'workflow_dispatch' && '1' || '' }}
 
 jobs:
-  review:
+  # Not "review": the test quality agent's job already has that name, and required status
+  # checks match by job name.
+  code-review:
     if: >-
       github.event_name == 'workflow_dispatch' || (
         github.event.pull_request.draft == false &&

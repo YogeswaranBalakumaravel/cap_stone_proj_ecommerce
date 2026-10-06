@@ -98,7 +98,8 @@ CODEOWNERS on the changed files decides whether it stands.
 2. Merge to `main`, `dev` and `staging` first; the workflow loads the agent from the base branch.
 3. Sign-in: nothing new if the test quality agent works (same `QA_PROVIDER`, variables and trust
    rule). With `QA_PROVIDER` unset or `none`, the scripts still run and can block.
-4. Make **Code review agent / review** a required status check on the three branches.
+4. Make **Code review agent / code-review** (check name `code-review`) a required status check
+   on the three branches.
 5. CODEOWNERS: `/.qa/` and `/.github/workflows/` owned by the QA team.
 6. Write acceptance criteria under an "Acceptance criteria" heading, one per line, ideally with ids
    (`AC-1: ...`). Optionally a `## Scope` section listing path globs. Jira works as in the test

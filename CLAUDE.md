@@ -97,7 +97,8 @@ library only; see `.qa/code-review/README.md`). It reuses the test quality agent
 from `.qa/agent/` and the same `QA_PROVIDER`; with that unset, its deterministic checks still
 run and can still block. It loads from the PR's base branch too. Only lines the PR adds can block;
 judgement calls wait for a reviewer (not the author) to approve with `attest: <check>`.
-`CODE_REVIEW_MODE=advisory` makes it comment-only.
+`CODE_REVIEW_MODE=advisory` makes it comment-only. Its job is `code-review`, not `review`, so it
+doesn't share a required-check name with the test quality agent.
 
 ## Notes / non-goals (v1)
 
