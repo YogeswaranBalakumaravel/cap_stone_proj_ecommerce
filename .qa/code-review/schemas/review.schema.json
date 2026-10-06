@@ -1,0 +1,432 @@
+{
+ "$schema": "https://json-schema.org/draft/2020-12/schema",
+ "type": "object",
+ "required": [
+  "summary",
+  "check_summaries",
+  "findings",
+  "requirement_map",
+  "oracle_coverage",
+  "scope_map",
+  "sink_verdicts",
+  "limitations",
+  "confidence"
+ ],
+ "properties": {
+  "summary": {
+   "type": "string"
+  },
+  "check_summaries": {
+   "type": "object",
+   "properties": {
+    "dependency_hygiene": {
+     "type": "string"
+    },
+    "plausible_logic": {
+     "type": "string"
+    },
+    "requirement_coverage": {
+     "type": "string"
+    },
+    "error_handling": {
+     "type": "string"
+    },
+    "scope_creep": {
+     "type": "string"
+    },
+    "duplication_drift": {
+     "type": "string"
+    },
+    "llm_antipatterns": {
+     "type": "string"
+    },
+    "injection_surfaces": {
+     "type": "string"
+    },
+    "assertions_never_fail": {
+     "type": "string"
+    },
+    "tests_assert_requirements": {
+     "type": "string"
+    }
+   }
+  },
+  "findings": {
+   "type": "array",
+   "items": {
+    "type": "object",
+    "required": [
+     "check",
+     "severity",
+     "confidence",
+     "file",
+     "line",
+     "evidence",
+     "title",
+     "explanation",
+     "suggestion"
+    ],
+    "properties": {
+     "check": {
+      "enum": [
+       "dependency_hygiene",
+       "plausible_logic",
+       "requirement_coverage",
+       "error_handling",
+       "scope_creep",
+       "duplication_drift",
+       "llm_antipatterns",
+       "injection_surfaces",
+       "assertions_never_fail",
+       "tests_assert_requirements"
+      ]
+     },
+     "severity": {
+      "enum": [
+       "blocker",
+       "high",
+       "medium",
+       "low",
+       "info"
+      ]
+     },
+     "confidence": {
+      "enum": [
+       "high",
+       "medium",
+       "low"
+      ]
+     },
+     "area": {
+      "enum": [
+       "backend",
+       "frontend",
+       "test",
+       "cross_layer"
+      ]
+     },
+     "file": {
+      "type": "string"
+     },
+     "line": {
+      "type": "integer",
+      "minimum": 1
+     },
+     "evidence": {
+      "type": "string",
+      "maxLength": 200
+     },
+     "title": {
+      "type": "string",
+      "maxLength": 120
+     },
+     "explanation": {
+      "type": "string"
+     },
+     "suggestion": {
+      "type": "string"
+     },
+     "caused_by": {
+      "type": "object",
+      "required": [
+       "file",
+       "line",
+       "evidence"
+      ],
+      "properties": {
+       "file": {
+        "type": "string"
+       },
+       "line": {
+        "type": "integer",
+        "minimum": 1
+       },
+       "evidence": {
+        "type": "string",
+        "maxLength": 200
+       }
+      }
+     },
+     "trace": {
+      "type": "array",
+      "items": {
+       "type": "object",
+       "required": [
+        "input",
+        "expected",
+        "actual"
+       ],
+       "properties": {
+        "input": {
+         "type": "string"
+        },
+        "expected": {
+         "type": "string"
+        },
+        "actual": {
+         "type": "string"
+        }
+       }
+      }
+     },
+     "corroboration": {
+      "type": "object",
+      "required": [
+       "kind"
+      ],
+      "properties": {
+       "kind": {
+        "enum": [
+         "taint_source",
+         "existing_symbol",
+         "oracle_behaviour"
+        ]
+       },
+       "file": {
+        "type": "string"
+       },
+       "line": {
+        "type": "integer"
+       },
+       "evidence": {
+        "type": "string"
+       },
+       "behaviour_id": {
+        "type": "string"
+       }
+      }
+     }
+    }
+   }
+  },
+  "requirement_map": {
+   "type": "array",
+   "items": {
+    "type": "object",
+    "required": [
+     "criterion_id",
+     "status"
+    ],
+    "properties": {
+     "criterion_id": {
+      "type": "string"
+     },
+     "status": {
+      "enum": [
+       "implemented",
+       "partial",
+       "missing",
+       "not_applicable",
+       "unclear"
+      ]
+     },
+     "implemented_at": {
+      "type": "array",
+      "items": {
+       "type": "object",
+       "required": [
+        "file",
+        "line",
+        "evidence"
+       ],
+       "properties": {
+        "file": {
+         "type": "string"
+        },
+        "line": {
+         "type": "integer",
+         "minimum": 1
+        },
+        "evidence": {
+         "type": "string",
+         "maxLength": 200
+        }
+       }
+      }
+     },
+     "tested_by": {
+      "type": "array",
+      "items": {
+       "type": "object",
+       "required": [
+        "file",
+        "line",
+        "evidence"
+       ],
+       "properties": {
+        "file": {
+         "type": "string"
+        },
+        "line": {
+         "type": "integer",
+         "minimum": 1
+        },
+        "evidence": {
+         "type": "string",
+         "maxLength": 200
+        }
+       }
+      }
+     },
+     "note": {
+      "type": "string"
+     }
+    }
+   }
+  },
+  "oracle_coverage": {
+   "type": "array",
+   "items": {
+    "type": "object",
+    "required": [
+     "behaviour_id",
+     "status"
+    ],
+    "properties": {
+     "behaviour_id": {
+      "type": "string"
+     },
+     "status": {
+      "enum": [
+       "asserted",
+       "asserted_differently",
+       "missing"
+      ]
+     },
+     "test": {
+      "type": "object",
+      "required": [
+       "file",
+       "line",
+       "evidence"
+      ],
+      "properties": {
+       "file": {
+        "type": "string"
+       },
+       "line": {
+        "type": "integer",
+        "minimum": 1
+       },
+       "evidence": {
+        "type": "string",
+        "maxLength": 200
+       }
+      }
+     },
+     "note": {
+      "type": "string"
+     }
+    }
+   }
+  },
+  "scope_map": {
+   "type": "array",
+   "items": {
+    "type": "object",
+    "required": [
+     "file",
+     "justified_by"
+    ],
+    "properties": {
+     "file": {
+      "type": "string"
+     },
+     "justified_by": {
+      "type": "array",
+      "items": {
+       "type": "string"
+      }
+     },
+     "note": {
+      "type": "string"
+     }
+    }
+   }
+  },
+  "sink_verdicts": {
+   "type": "array",
+   "items": {
+    "type": "object",
+    "required": [
+     "finding_id",
+     "verdict"
+    ],
+    "properties": {
+     "finding_id": {
+      "type": "string"
+     },
+     "verdict": {
+      "enum": [
+       "tainted",
+       "safe",
+       "unclear"
+      ]
+     },
+     "source": {
+      "type": "object",
+      "required": [
+       "file",
+       "line",
+       "evidence"
+      ],
+      "properties": {
+       "file": {
+        "type": "string"
+       },
+       "line": {
+        "type": "integer",
+        "minimum": 1
+       },
+       "evidence": {
+        "type": "string",
+        "maxLength": 200
+       }
+      }
+     },
+     "reason": {
+      "type": "string"
+     }
+    }
+   }
+  },
+  "script_adjudications": {
+   "type": "array",
+   "items": {
+    "type": "object",
+    "required": [
+     "finding_id",
+     "verdict",
+     "reason"
+    ],
+    "properties": {
+     "finding_id": {
+      "type": "string"
+     },
+     "verdict": {
+      "enum": [
+       "confirm",
+       "dispute"
+      ]
+     },
+     "reason": {
+      "type": "string"
+     }
+    }
+   }
+  },
+  "limitations": {
+   "type": "array",
+   "items": {
+    "type": "string"
+   }
+  },
+  "confidence": {
+   "enum": [
+    "high",
+    "medium",
+    "low"
+   ]
+  }
+ }
+}
