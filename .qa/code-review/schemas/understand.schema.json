@@ -1,0 +1,218 @@
+{
+ "$schema": "https://json-schema.org/draft/2020-12/schema",
+ "type": "object",
+ "required": [
+  "ask",
+  "existing_system",
+  "implementation",
+  "impacted_existing_code",
+  "risk_hotspots"
+ ],
+ "properties": {
+  "ask": {
+   "type": "object",
+   "required": [
+    "restated",
+    "criteria"
+   ],
+   "properties": {
+    "restated": {
+     "type": "string"
+    },
+    "criteria": {
+     "type": "array",
+     "items": {
+      "type": "object",
+      "required": [
+       "id",
+       "text"
+      ],
+      "properties": {
+       "id": {
+        "type": "string"
+       },
+       "text": {
+        "type": "string"
+       },
+       "ambiguity": {
+        "type": "string"
+       }
+      }
+     }
+    }
+   }
+  },
+  "existing_system": {
+   "type": "object",
+   "required": [
+    "summary",
+    "conventions",
+    "relevant_existing_code"
+   ],
+   "properties": {
+    "summary": {
+     "type": "string"
+    },
+    "conventions": {
+     "type": "array",
+     "items": {
+      "type": "object",
+      "required": [
+       "rule",
+       "source"
+      ],
+      "properties": {
+       "rule": {
+        "type": "string"
+       },
+       "source": {
+        "type": "string"
+       }
+      }
+     }
+    },
+    "relevant_existing_code": {
+     "type": "array",
+     "items": {
+      "type": "object",
+      "required": [
+       "file",
+       "line",
+       "evidence",
+       "symbol",
+       "role"
+      ],
+      "properties": {
+       "file": {
+        "type": "string"
+       },
+       "line": {
+        "type": "integer",
+        "minimum": 1
+       },
+       "evidence": {
+        "type": "string",
+        "maxLength": 200
+       },
+       "symbol": {
+        "type": "string"
+       },
+       "role": {
+        "type": "string"
+       }
+      }
+     }
+    }
+   }
+  },
+  "implementation": {
+   "type": "array",
+   "items": {
+    "type": "object",
+    "required": [
+     "file",
+     "line",
+     "evidence",
+     "unit",
+     "kind",
+     "what_it_does",
+     "serves"
+    ],
+    "properties": {
+     "file": {
+      "type": "string"
+     },
+     "line": {
+      "type": "integer",
+      "minimum": 1
+     },
+     "evidence": {
+      "type": "string",
+      "maxLength": 200
+     },
+     "unit": {
+      "type": "string"
+     },
+     "kind": {
+      "enum": [
+       "new",
+       "modified",
+       "deleted"
+      ]
+     },
+     "what_it_does": {
+      "type": "string"
+     },
+     "serves": {
+      "type": "array",
+      "items": {
+       "type": "string"
+      }
+     }
+    }
+   }
+  },
+  "impacted_existing_code": {
+   "type": "array",
+   "items": {
+    "type": "object",
+    "required": [
+     "file",
+     "line",
+     "evidence",
+     "why"
+    ],
+    "properties": {
+     "file": {
+      "type": "string"
+     },
+     "line": {
+      "type": "integer",
+      "minimum": 1
+     },
+     "evidence": {
+      "type": "string",
+      "maxLength": 200
+     },
+     "why": {
+      "type": "string"
+     }
+    }
+   }
+  },
+  "risk_hotspots": {
+   "type": "array",
+   "items": {
+    "type": "object",
+    "required": [
+     "file",
+     "line",
+     "evidence",
+     "why"
+    ],
+    "properties": {
+     "file": {
+      "type": "string"
+     },
+     "line": {
+      "type": "integer",
+      "minimum": 1
+     },
+     "evidence": {
+      "type": "string",
+      "maxLength": 200
+     },
+     "why": {
+      "type": "string"
+     }
+    }
+   }
+  },
+  "open_questions": {
+   "type": "array",
+   "items": {
+    "type": "string"
+   }
+  }
+ }
+}
