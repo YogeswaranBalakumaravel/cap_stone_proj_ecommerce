@@ -63,6 +63,7 @@
       function render(message) {
         bar.hidden = order.length === 0 && !message;
         button.hidden = order.length !== 2;
+        // review: ignore[INJ002] order holds only .compare-box values, which are server-rendered phone IDs
         button.setAttribute("href", base + "?ids=" + order.join(","));
         hint.textContent = message ||
           (order.length === 1 ? "Pick one more phone to compare." : "");
