@@ -59,7 +59,9 @@ duplicating filter logic between the two.
 **Routes**: `/` (catalog, `?brand=`, `?sort=`), `/phone/<id>` (detail, 404 if
 missing), `/api/phones` (same filters as `/`, JSON via `Phone.to_dict()`),
 `/healthz` (used by Render's health check, and by `render.yaml`/`config.py`
-which both assume it exists).
+which both assume it exists). `/compare?ids=a,b` and `/api/compare?ids=a,b` show two phones side
+by side; both use `_compare_phones()` in `routes.py` (400 for bad `ids`, 404 for an
+unknown phone), and `/?compare=<id>` opens the catalog with that phone ticked.
 
 **Seed data** (`app/seed_data.py`): a plain list of `dict(...)` phone records —
 hand-edited, not fetched from any API, and explicitly *not* meant to track real
@@ -87,6 +89,16 @@ changes to it take effect only after they merge. It's the mandatory PR gate for
 to only comment), and a required status check (**Test quality agent / review**).
 The earlier Mutmut and OSV-Scanner gates were removed; the agent's systematic
 mutants cover mutation testing.
+
+`.github/workflows/code-review-agent.yml`: on PRs to `main`, `dev` and `staging`, a code
+review agent checks the PR's backend, frontend and test code against the ten Stream A checks
+of the *Checklist for AI-Assisted Applications*. The code lives in `.qa/code-review/` (standard
+library only; see `.qa/code-review/README.md`). It reuses the test quality agent's OIDC sign-in
+from `.qa/agent/` and the same `QA_PROVIDER`; with that unset, its deterministic checks still
+run and can still block. It loads from the PR's base branch too. Only lines the PR adds can block;
+judgement calls wait for a reviewer (not the author) to approve with `attest: <check>`.
+`CODE_REVIEW_MODE=advisory` makes it comment-only. Its job is `code-review`, not `review`, so it
+doesn't share a required-check name with the test quality agent.
 
 ## Notes / non-goals (v1)
 

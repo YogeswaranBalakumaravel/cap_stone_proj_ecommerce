@@ -12,3 +12,4 @@ instance/
 .coverage
 htmlcov/
 .qa-out/
+.cr-out/
