@@ -18,6 +18,9 @@ agent.provider in config.json):
     foundry     Microsoft Foundry with Entra workload identity: ANTHROPIC_FOUNDRY_RESOURCE,
                 AZURE_CLIENT_ID, AZURE_TENANT_ID, and QA_MODEL (the deployment name)
     none        don't run the agent; the gate uses the scripts' evidence on its own
+    subscription  EXPERIMENT (AC-168), not OIDC: a Claude seat's long-lived OAuth token from
+                `claude setup-token`, stored as the secret QA_SUBSCRIPTION_OAUTH_TOKEN. This breaks
+                the "nothing stored" control, so use it only to measure the seat route.
 
 In GitHub Actions the job needs `permissions: id-token: write`. The script fetches a GitHub OIDC
 token for the provider's audience, writes it to a private file, and replaces it every two minutes
@@ -44,6 +47,9 @@ from pathlib import Path
 from common import QA_HOME, QA_OUT, REPO, extract_agent_output, load_config, write_json
 
 FORBIDDEN = ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN")
+# The AC-168 seat token arrives under its own name, so CLAUDE_CODE_OAUTH_TOKEN stays forbidden and
+# the token reaches the CLI only when QA_PROVIDER=subscription.
+SUBSCRIPTION_SECRET = "QA_SUBSCRIPTION_OAUTH_TOKEN"
 PROVIDER_SWITCHES = ("CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX", "CLAUDE_CODE_USE_FOUNDRY")
 PROVIDER_VARS = {
     "anthropic": (
@@ -78,6 +84,7 @@ PROVIDER_VARS = {
         "AZURE_FEDERATED_TOKEN_FILE",
         "AZURE_AUTHORITY_HOST",
     ),
+    "subscription": (),
 }
 AUDIENCE = {
     "anthropic": "https://api.anthropic.com",
@@ -155,14 +162,17 @@ def build_env(
     """Return (environment, OIDC audience or None, token file or None, files to delete)."""
     if provider not in PROVIDER_VARS:
         raise SetupError(
-            f"Unknown QA_PROVIDER '{provider}'. Use anthropic, bedrock, vertex, foundry or none."
+            f"Unknown QA_PROVIDER '{provider}'. "
+            "Use anthropic, bedrock, vertex, foundry, subscription or none."
         )
-    env = {k: v for k, v in os.environ.items() if k not in FORBIDDEN and k not in PROVIDER_SWITCHES}
+    env = {
+        k: v
+        for k, v in os.environ.items()
+        if k not in FORBIDDEN and k not in PROVIDER_SWITCHES and k != SUBSCRIPTION_SECRET
+    }
     for name in FORBIDDEN:
         if os.environ.get(name):
-            print(
-                f"::notice::{name} is set but ignored: this pipeline authenticates with OIDC only."
-            )
+            print(f"::notice::{name} is set but ignored: this pipeline never reads it.")
     for other, names in PROVIDER_VARS.items():  # settings for other providers must not leak in
         if other != provider:
             for name in names:
@@ -248,6 +258,22 @@ def build_env(
             env["AZURE_FEDERATED_TOKEN_FILE"] = str(token_file)
         return env, (AUDIENCE["foundry"] if ci else None), (token_file if ci else None), cleanup
 
+    if provider == "subscription":
+        token = os.environ.get(SUBSCRIPTION_SECRET, "").strip()
+        if not token:
+            raise SetupError(
+                f"QA_PROVIDER=subscription needs the repository secret {SUBSCRIPTION_SECRET} "
+                "(run `claude setup-token` with the seat's account)"
+            )
+        if ci:
+            print(f"::add-mask::{token}")
+        print(
+            "::warning::AC-168 experiment: signing in with a long-lived subscription OAuth token, "
+            "not OIDC."
+        )
+        env["CLAUDE_CODE_OAUTH_TOKEN"] = token
+        return env, None, None, cleanup
+
     raise SetupError(f"Unhandled provider '{provider}'.")
 
 
@@ -268,6 +294,22 @@ def build_prompt(pass_name: str, cfg: dict) -> tuple[str, str]:
         + "\n```\n"
     )
     return prompt, schema
+
+
+def scrub_secret(paths: list[Path], secret: str | None) -> None:
+    """Blank a stored secret out of the agent's output. Log masking doesn't cover the PR comment
+    or the uploaded evidence, and a PR could try to talk the agent into echoing the token."""
+    if not secret:
+        return
+    needle = secret.encode("utf-8")
+    for path in paths:
+        try:
+            data = path.read_bytes()
+        except OSError:
+            continue
+        if needle in data:
+            path.write_bytes(data.replace(needle, b"***"))
+            print(f"::warning::Removed the subscription token from {path.name}.")
 
 
 def record_failure(pass_name: str, subtype: str, message: str) -> int:
@@ -381,6 +423,10 @@ def main() -> int:
                 return record_failure(
                     pass_name, "cli_missing", "The Claude Code CLI isn't installed on this runner."
                 )
+        scrub_secret(
+            [QA_OUT / f"{pass_name}.envelope.json", QA_OUT / f"{pass_name}.stderr.log"],
+            env.get("CLAUDE_CODE_OAUTH_TOKEN"),
+        )
         if code:
             print(
                 f"::warning::The agent CLI exited with code {code} "

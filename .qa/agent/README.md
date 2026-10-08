@@ -123,6 +123,16 @@ A pull request's OIDC token has the subject `repo:ORG/REPO:pull_request`. Every 
 2. Assign that identity the **Azure AI User** role on the Foundry resource, and deploy a Claude model there.
 3. Set the variables `ANTHROPIC_FOUNDRY_RESOURCE`, `AZURE_CLIENT_ID`, `AZURE_TENANT_ID` and `QA_MODEL` (the deployment name).
 
+### Claude seat, experiment only (`QA_PROVIDER=subscription`)
+
+**This is not OIDC.** It exists so AC-168 can measure the "one Claude seat per project" route, and it breaks the *no stored secret* control above. Don't use it as a project's normal setup.
+
+1. Sign in to claude.ai with the seat's account and run `claude setup-token` locally. Note the expiry date it prints. An entitlement error here means the seat doesn't include Claude Code.
+2. Store the token as the repository **secret** `QA_SUBSCRIPTION_OAUTH_TOKEN` (`gh secret set QA_SUBSCRIPTION_OAUTH_TOKEN`), then set the variable `QA_PROVIDER=subscription`.
+3. The workflow gives the secret only to the two agent steps, and only while `QA_PROVIDER=subscription`. The `evidence` job, which runs PR code, never sees it. `CLAUDE_CODE_OAUTH_TOKEN` itself is still stripped from the environment. `run_agent.py` maps the secret onto it only for this provider, and blanks the token out of the agent's output before it reaches the PR comment or the evidence artifact.
+4. Usage counts against the seat's limits. When the seat is throttled, the agent pass fails and the gate falls back to the scripts' evidence, just as when a provider is unavailable. Check the run log, because the PR comment won't call out the throttling.
+5. When the experiment ends, delete the secret, unset `QA_PROVIDER`, and revoke the token in the account's claude.ai settings.
+
 ### Scripts only (`QA_PROVIDER=none`, the default)
 
 The agent steps are skipped. The gate still runs coverage, the change-reverted check, systematic mutants and the assertion scan, and it can still block on them. Checks 2 to 4 show "agent off".
@@ -144,7 +154,7 @@ The agent steps are skipped. The gate still runs coverage, the change-reverted c
 | `probes.line_tolerance` | How far the script searches when the agent's line number is slightly off. |
 | `probes.min_valid_for_score` | The minimum number of valid probes before a mutation score is reported. |
 | `requirements.*` | Where acceptance criteria come from: the PR description heading, `files` (for example `docs/acceptance/*.md`), or Jira. Set `require: true` to fail check 2 when no criteria are given. |
-| `agent.provider` | How the agent signs in: `anthropic`, `bedrock`, `vertex`, `foundry` or `none` (default). The repository variable `QA_PROVIDER` overrides it. |
+| `agent.provider` | How the agent signs in: `anthropic`, `bedrock`, `vertex`, `foundry`, `subscription` (AC-168 experiment) or `none` (default). The repository variable `QA_PROVIDER` overrides it. |
 | `agent.model`, `max_turns`, `max_budget_usd`, `timeout_seconds` | The model (or the `QA_MODEL` variable), and cost, turn and time limits for each pass. |
 | `thresholds.*` | The pass marks for each metric. |
 | `blocking_dimensions` | Which checks can fail the job in blocking mode. The default is `business_scenarios` and `change_validation`. |

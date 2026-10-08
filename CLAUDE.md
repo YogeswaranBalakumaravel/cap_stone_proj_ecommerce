@@ -88,7 +88,12 @@ changes to it take effect only after they merge. It's the mandatory PR gate for
 `main`, `dev` and `staging`: blocking by default (`QA_MODE=advisory` repo variable
 to only comment), and a required status check (**Test quality agent / review**).
 The earlier Mutmut and OSV-Scanner gates were removed; the agent's systematic
-mutants cover mutation testing.
+mutants cover mutation testing. The one exception to "no OAuth token" is
+`QA_PROVIDER=subscription`, an AC-168 experiment that signs in with a Claude seat's
+`claude setup-token` stored as the secret `QA_SUBSCRIPTION_OAUTH_TOKEN`. It is not a
+supported setup: leave it off unless that experiment is running. The code review agent
+isn't given that secret, so with `subscription` set its agent passes fail setup and it
+falls back to its deterministic checks.
 
 `.github/workflows/code-review-agent.yml`: on PRs to `main`, `dev` and `staging`, a code
 review agent checks the PR's backend, frontend and test code against the ten Stream A checks
