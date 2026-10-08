@@ -5,10 +5,10 @@
     run_passes.py oracle       separate context: criteria + signatures only, no tools, no repo
     run_passes.py review       the ten checks, with the understanding and the oracle as input
 
-Sign-in is shared with the test quality agent: the keyless OIDC provider setup is imported from
-.qa/agent/run_agent.py (QA_PROVIDER = anthropic | bedrock | vertex | foundry | none). API keys and
-OAuth tokens are stripped. With QA_PROVIDER=none every pass is skipped and the gate runs on the
-scripts alone.
+Sign-in is shared with the test quality agent: the provider setup is imported from
+.qa/agent/run_agent.py (QA_PROVIDER = anthropic | bedrock | vertex | foundry | oauth | none).
+API keys are stripped, and CLAUDE_CODE_OAUTH_TOKEN is kept only for oauth. With QA_PROVIDER=none
+every pass is skipped and the gate runs on the scripts alone.
 """
 
 from __future__ import annotations
@@ -84,7 +84,15 @@ def main() -> int:
 
     sys.path.insert(0, str(QA_AGENT_HOME))
     try:
-        from run_agent import SetupError, TokenRotator, build_env, fetch_oidc_token, write_private
+        from run_agent import (
+            OAUTH_TOKEN,
+            SetupError,
+            TokenRotator,
+            build_env,
+            fetch_oidc_token,
+            scrub_secret,
+            write_private,
+        )
     except ImportError as exc:
         return skip(
             pass_name, f"can't load the shared sign-in from {QA_AGENT_HOME}/run_agent.py ({exc})."
@@ -166,6 +174,10 @@ def main() -> int:
                         }
                     ).encode()
                 )
+        scrub_secret(
+            [CR_OUT / f"{pass_name}.envelope.json", CR_OUT / f"{pass_name}.stderr.log"],
+            env.get(OAUTH_TOKEN),
+        )
         if code:
             print(f"::warning::The agent CLI exited with code {code} (see {pass_name}.stderr.log).")
         return extract_agent_output(pass_name)
