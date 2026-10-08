@@ -58,6 +58,26 @@ def test_schema_uses_no_draft_2020_only_keywords(path):
     assert schema["type"] == "object"
     assert schema["required"], "the agent output must have required fields"
     assert not DRAFT_2020_ONLY & set(keywords(schema))
+    assert all(ref.startswith("#") for ref in refs(schema)), "the CLI can't fetch remote $refs"
+
+
+def refs(node):
+    """Every $ref value in the schema."""
+    if isinstance(node, list):
+        for item in node:
+            yield from refs(item)
+    elif isinstance(node, dict):
+        for key, value in node.items():
+            if key == "$ref" and isinstance(value, str):
+                yield value
+            else:
+                yield from refs(value)
+
+
+def test_ref_scan_finds_remote_refs():
+    schema = {"type": "object", "properties": {"a": {"$ref": "#/x"}, "b": [{"$ref": "http://y"}]}}
+
+    assert list(refs(schema)) == ["#/x", "http://y"]
 
 
 def test_keyword_scan_finds_nested_draft_2020_keywords():
