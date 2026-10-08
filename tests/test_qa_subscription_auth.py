@@ -4,14 +4,18 @@ The seat token must reach the Claude CLI only for QA_PROVIDER=subscription, neve
 providers, and must never survive in the agent output that becomes the PR comment.
 """
 
+import importlib.util
 import sys
 from pathlib import Path
 
 import pytest
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / ".qa" / "agent"))
-
-import run_agent  # noqa: E402
+# run_agent.py is QA tooling, not a package: load it by path. It imports its sibling `common`.
+QA_AGENT = Path(__file__).resolve().parents[1] / ".qa" / "agent"
+sys.path.insert(0, str(QA_AGENT))
+_spec = importlib.util.spec_from_file_location("qa_run_agent", QA_AGENT / "run_agent.py")
+run_agent = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(run_agent)
 
 TOKEN = "sk-ant-oat01-test-only-not-a-real-token"
 
