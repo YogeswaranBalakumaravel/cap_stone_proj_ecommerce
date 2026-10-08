@@ -4,10 +4,15 @@
     python3 run_agent.py plan      design the probes
     python3 run_agent.py review    answer the six questions
 
-No API keys and no OAuth tokens. ANTHROPIC_API_KEY, ANTHROPIC_AUTH_TOKEN and CLAUDE_CODE_OAUTH_TOKEN
-are removed from the agent's environment even if they are set. The agent authenticates with the CI
-job's own short-lived OIDC identity through one provider (repository variable QA_PROVIDER, or
-agent.provider in config.json):
+No API keys. ANTHROPIC_API_KEY, ANTHROPIC_AUTH_TOKEN and CLAUDE_CODE_OAUTH_TOKEN are removed from
+the agent's environment even if they are set, except that QA_PROVIDER=oauth keeps
+CLAUDE_CODE_OAUTH_TOKEN. The agent signs in through one provider (repository variable QA_PROVIDER,
+or agent.provider in config.json):
+
+    oauth       a Claude seat's OAuth token from `claude setup-token`, stored as the repository
+                secret CLAUDE_CODE_OAUTH_TOKEN. Long-lived and stored, so not OIDC.
+
+The other providers use the CI job's own short-lived OIDC identity:
 
     anthropic   Anthropic workload identity federation: ANTHROPIC_FEDERATION_RULE_ID and
                 ANTHROPIC_ORGANIZATION_ID (+ optional ANTHROPIC_SERVICE_ACCOUNT_ID,
@@ -44,6 +49,7 @@ from pathlib import Path
 from common import QA_HOME, QA_OUT, REPO, extract_agent_output, load_config, write_json
 
 FORBIDDEN = ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN")
+OAUTH_TOKEN = "CLAUDE_CODE_OAUTH_TOKEN"  # kept only for QA_PROVIDER=oauth
 PROVIDER_SWITCHES = ("CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX", "CLAUDE_CODE_USE_FOUNDRY")
 PROVIDER_VARS = {
     "anthropic": (
@@ -78,6 +84,7 @@ PROVIDER_VARS = {
         "AZURE_FEDERATED_TOKEN_FILE",
         "AZURE_AUTHORITY_HOST",
     ),
+    "oauth": (),
 }
 AUDIENCE = {
     "anthropic": "https://api.anthropic.com",
@@ -155,14 +162,13 @@ def build_env(
     """Return (environment, OIDC audience or None, token file or None, files to delete)."""
     if provider not in PROVIDER_VARS:
         raise SetupError(
-            f"Unknown QA_PROVIDER '{provider}'. Use anthropic, bedrock, vertex, foundry or none."
+            f"Unknown QA_PROVIDER '{provider}'. "
+            "Use anthropic, bedrock, vertex, foundry, oauth or none."
         )
     env = {k: v for k, v in os.environ.items() if k not in FORBIDDEN and k not in PROVIDER_SWITCHES}
     for name in FORBIDDEN:
-        if os.environ.get(name):
-            print(
-                f"::notice::{name} is set but ignored: this pipeline authenticates with OIDC only."
-            )
+        if os.environ.get(name) and not (provider == "oauth" and name == OAUTH_TOKEN):
+            print(f"::notice::{name} is set but ignored by QA_PROVIDER={provider}.")
     for other, names in PROVIDER_VARS.items():  # settings for other providers must not leak in
         if other != provider:
             for name in names:
@@ -248,6 +254,24 @@ def build_env(
             env["AZURE_FEDERATED_TOKEN_FILE"] = str(token_file)
         return env, (AUDIENCE["foundry"] if ci else None), (token_file if ci else None), cleanup
 
+    if provider == "oauth":
+        token = os.environ.get(OAUTH_TOKEN, "").strip()
+        if not token:
+            raise SetupError(
+                f"QA_PROVIDER=oauth needs the repository secret {OAUTH_TOKEN} "
+                "(run `claude setup-token` with the seat's account)"
+            )
+        if ci:
+            print(f"::add-mask::{token}")
+        if token.startswith("sk-ant-api"):
+            raise SetupError(
+                f"{OAUTH_TOKEN} holds an API key, not an OAuth token. "
+                "Store the token that `claude setup-token` prints (it starts with sk-ant-oat)."
+            )
+        print("::notice::Signing in with the stored CLAUDE_CODE_OAUTH_TOKEN secret, not OIDC.")
+        env[OAUTH_TOKEN] = token
+        return env, None, None, cleanup
+
     raise SetupError(f"Unhandled provider '{provider}'.")
 
 
@@ -268,6 +292,22 @@ def build_prompt(pass_name: str, cfg: dict) -> tuple[str, str]:
         + "\n```\n"
     )
     return prompt, schema
+
+
+def scrub_secret(paths: list[Path], secret: str | None) -> None:
+    """Blank a stored secret out of the agent's output. Log masking doesn't cover the PR comment
+    or the uploaded evidence, and a PR could try to talk the agent into echoing the token."""
+    if not secret:
+        return
+    needle = secret.encode("utf-8")
+    for path in paths:
+        try:
+            data = path.read_bytes()
+        except OSError:
+            continue
+        if needle in data:
+            path.write_bytes(data.replace(needle, b"***"))
+            print(f"::warning::Removed the OAuth token from {path.name}.")
 
 
 def record_failure(pass_name: str, subtype: str, message: str) -> int:
@@ -381,6 +421,10 @@ def main() -> int:
                 return record_failure(
                     pass_name, "cli_missing", "The Claude Code CLI isn't installed on this runner."
                 )
+        scrub_secret(
+            [QA_OUT / f"{pass_name}.envelope.json", QA_OUT / f"{pass_name}.stderr.log"],
+            env.get(OAUTH_TOKEN),
+        )
         if code:
             print(
                 f"::warning::The agent CLI exited with code {code} "

@@ -81,9 +81,11 @@ non-blocking AI PR review gate — leave it commented unless asked to wire it up
 a headless Claude Code agent reviews the tests the PR brings (meaningful? business
 scenarios covered? sunny/rainy days? edge cases? trivial assertions? validates the
 change?). The code lives in `.qa/agent/` (standard-library Python only; see
-`.qa/agent/README.md`). It signs in with the job's GitHub OIDC token, never an API
-key or OAuth token; with the `QA_PROVIDER` repo variable unset it runs its
-scripts-only checks. The workflow loads `.qa/agent/` from the PR's base branch, so
+`.qa/agent/README.md`). It never uses an API key. `QA_PROVIDER=anthropic|bedrock|vertex|foundry`
+signs in with the job's GitHub OIDC token; `QA_PROVIDER=oauth` uses a Claude seat's
+`claude setup-token` stored as the repo secret `CLAUDE_CODE_OAUTH_TOKEN` (long-lived, so not
+OIDC), passed only to the agent steps and scrubbed from the agent's output. With
+`QA_PROVIDER` unset it runs its scripts-only checks. The workflow loads `.qa/agent/` from the PR's base branch, so
 changes to it take effect only after they merge. It's the mandatory PR gate for
 `main`, `dev` and `staging`: blocking by default (`QA_MODE=advisory` repo variable
 to only comment), and a required status check (**Test quality agent / review**).
@@ -93,8 +95,8 @@ mutants cover mutation testing.
 `.github/workflows/code-review-agent.yml`: on PRs to `main`, `dev` and `staging`, a code
 review agent checks the PR's backend, frontend and test code against the ten Stream A checks
 of the *Checklist for AI-Assisted Applications*. The code lives in `.qa/code-review/` (standard
-library only; see `.qa/code-review/README.md`). It reuses the test quality agent's OIDC sign-in
-from `.qa/agent/` and the same `QA_PROVIDER`; with that unset, its deterministic checks still
+library only; see `.qa/code-review/README.md`). It reuses the test quality agent's sign-in
+from `.qa/agent/` and the same `QA_PROVIDER` (including `oauth`); with that unset, its deterministic checks still
 run and can still block. It loads from the PR's base branch too. Only lines the PR adds can block;
 judgement calls wait for a reviewer (not the author) to approve with `attest: <check>`.
 `CODE_REVIEW_MODE=advisory` makes it comment-only. Its job is `code-review`, not `review`, so it

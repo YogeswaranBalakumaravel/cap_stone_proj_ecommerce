@@ -1,9 +1,11 @@
 # Test quality agent: a headless Claude Code agent that reviews the unit and integration tests in every PR.
 #
-# No API keys and no OAuth tokens. The agent signs in with this job's short-lived GitHub OIDC identity,
-# through the provider named in the repository variable QA_PROVIDER:
-#   anthropic | bedrock | vertex | foundry | none (default: scripts only, no agent)
-# Provider IDs are repository variables, not secrets. See .qa/agent/README.md for the setup of each.
+# No API keys. The agent signs in through the provider named in the repository variable QA_PROVIDER:
+#   anthropic | bedrock | vertex | foundry   this job's short-lived GitHub OIDC identity
+#   oauth                                    the repository secret CLAUDE_CODE_OAUTH_TOKEN (a Claude
+#                                            seat's `claude setup-token`), given to the agent steps only
+#   none                                     the default: scripts only, no agent
+# OIDC provider IDs are repository variables, not secrets. See .qa/agent/README.md for each setup.
 #
 #   plan      collect context, agent designs probes              can mint OIDC tokens, never runs PR code
 #   evidence  your tests: baseline, coverage, change reverted,   runs PR code, has no credentials at all
@@ -31,7 +33,7 @@ concurrency:
 env:
   QA_OUT: .qa-out
   QA_MODE: ${{ vars.QA_MODE }}            # blocking (default) or advisory
-  QA_PROVIDER: ${{ vars.QA_PROVIDER }}    # anthropic, bedrock, vertex, foundry, or none (default)
+  QA_PROVIDER: ${{ vars.QA_PROVIDER }}    # anthropic, bedrock, vertex, foundry, oauth, or none
   QA_MODEL: ${{ vars.QA_MODEL }}          # optional; required for foundry (the deployment name)
   CLAUDE_CODE_VERSION: latest             # pin an exact version for reproducible runs
   # Manual runs audit the whole project and try more systematic mutants.
@@ -107,6 +109,8 @@ jobs:
 
       - name: 2. Agent designs probes
         continue-on-error: true
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ vars.QA_PROVIDER == 'oauth' && secrets.CLAUDE_CODE_OAUTH_TOKEN || '' }}
         run: python3 "$QA_HOME/run_agent.py" plan
 
       - name: Hand over to the evidence job
@@ -242,6 +246,8 @@ jobs:
 
       - name: 4. Agent reviews the tests
         continue-on-error: true
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ vars.QA_PROVIDER == 'oauth' && secrets.CLAUDE_CODE_OAUTH_TOKEN || '' }}
         run: python3 "$QA_HOME/run_agent.py" review
 
       - name: 5. Gate
