@@ -25,6 +25,24 @@ from cr_common import CR_HOME, CR_OUT, REPO, extract_agent_output, load_config, 
 QA_AGENT_HOME = Path(os.environ.get("QA_AGENT_HOME") or CR_HOME.parent / "agent").resolve()
 READ_ONLY = "Read,Grep,Glob,Bash(git diff *),Bash(git show *),Bash(git log *)"
 PASSES = ("understand", "oracle", "review")
+# The CLI gives up after five schema-invalid submissions. Some models submit a large result one
+# section at a time, so a pass that ends this way gets one fresh run; any other error is final.
+OUTPUT_RETRIES_EXHAUSTED = "error_max_structured_output_retries"
+OUTPUT_ATTEMPTS = 2
+
+
+def envelope_subtype(pass_name: str) -> str | None:
+    """The `subtype` of the pass's CLI result envelope, or None if there isn't a readable one."""
+    try:
+        envelope = json.loads((CR_OUT / f"{pass_name}.envelope.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if isinstance(envelope, list):
+        envelope = next(
+            (m for m in reversed(envelope) if isinstance(m, dict) and m.get("type") == "result"),
+            None,
+        )
+    return envelope.get("subtype") if isinstance(envelope, dict) else None
 
 
 def skip(pass_name: str, reason: str, disabled: bool = False) -> int:
@@ -151,29 +169,38 @@ def main() -> int:
             args += ["--model", model]
         print(f"Pass '{pass_name}' via {provider}" + (f", model {model}" if model else ""))
         timeout = int(agent.get("timeout_seconds", 1200))
-        with (
-            open(CR_OUT / f"{pass_name}.envelope.json", "wb") as out,
-            open(CR_OUT / f"{pass_name}.stderr.log", "wb") as err,
-        ):
-            try:
-                code = subprocess.run(
-                    args, stdout=out, stderr=err, env=env, cwd=cwd, timeout=timeout
-                ).returncode
-            except subprocess.TimeoutExpired:
-                code = None
-                print(f"::warning::Pass '{pass_name}' timed out after {timeout}s.")
-            except FileNotFoundError:
-                code = None
-                out.write(
-                    json.dumps(
-                        {
-                            "type": "result",
-                            "is_error": True,
-                            "subtype": "cli_missing",
-                            "result": "The Claude Code CLI isn't installed.",
-                        }
-                    ).encode()
+        for attempt in range(1, OUTPUT_ATTEMPTS + 1):
+            with (
+                open(CR_OUT / f"{pass_name}.envelope.json", "wb") as out,
+                open(CR_OUT / f"{pass_name}.stderr.log", "wb") as err,
+            ):
+                try:
+                    code = subprocess.run(
+                        args, stdout=out, stderr=err, env=env, cwd=cwd, timeout=timeout
+                    ).returncode
+                except subprocess.TimeoutExpired:
+                    code = None
+                    print(f"::warning::Pass '{pass_name}' timed out after {timeout}s.")
+                except FileNotFoundError:
+                    code = None
+                    out.write(
+                        json.dumps(
+                            {
+                                "type": "result",
+                                "is_error": True,
+                                "subtype": "cli_missing",
+                                "result": "The Claude Code CLI isn't installed.",
+                            }
+                        ).encode()
+                    )
+            gave_up = envelope_subtype(pass_name) == OUTPUT_RETRIES_EXHAUSTED
+            if gave_up and attempt < OUTPUT_ATTEMPTS:
+                print(
+                    f"::warning::Pass '{pass_name}' never submitted a complete result "
+                    f"(attempt {attempt} of {OUTPUT_ATTEMPTS}); running it again."
                 )
+                continue
+            break
         scrub_secret(
             [CR_OUT / f"{pass_name}.envelope.json", CR_OUT / f"{pass_name}.stderr.log"],
             env.get(OAUTH_TOKEN),

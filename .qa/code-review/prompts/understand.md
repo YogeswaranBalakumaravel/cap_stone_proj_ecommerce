@@ -41,3 +41,16 @@ Every `file` + `line` you give must point at the PR head, and `evidence` must be
 exactly from that line (one line, at most 160 characters, no ellipsis). A script checks every
 citation and discards the ones that don't match. Never copy secrets or personal data into
 evidence; quote a part of the line that doesn't contain the value.
+
+## Submitting the result
+
+Finish all your reading first, then submit the whole result **in one call**: a single JSON object
+with all five top-level keys (`ask`, `existing_system`, `implementation`,
+`impacted_existing_code`, `risk_hotspots`, plus `open_questions` if you have any). The output
+tool doesn't accept sections one at a time. A call that leaves out a key is rejected and counts
+against a small retry limit, and running out of retries loses the whole pass.
+
+Keep it compact so that one call holds everything. List the most important items first, and cap
+each list: at most 10 `conventions`, 15 `relevant_existing_code`, 25 `implementation` units,
+15 `impacted_existing_code`, 10 `risk_hotspots` and 8 `open_questions`. Keep prose fields to one
+or two sentences. If a list has nothing to report, give an empty list rather than leaving it out.
