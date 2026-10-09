@@ -177,10 +177,44 @@ def ratio(num, den):
     return None if not den else round(num / den, 4)
 
 
+def short_test_name(name: str) -> str:
+    """The bare test name from a pytest id (tests/x.py::TestA::test_b), dotted name or bare name."""
+    return re.split(r"::|\.|#", name.strip())[-1].strip("() ") if name else ""
+
+
 def test_name_in_text(name: str, text: str) -> bool:
-    """Accept pytest ids (tests/x.py::TestA::test_b), dotted names or bare names."""
-    short = re.split(r"::|\.|#", name.strip())[-1].strip("() ") if name else ""
+    short = short_test_name(name)
     return not short or short in text
+
+
+def test_def_span(name: str, text: str) -> tuple[int, int] | None:
+    """(first, last) line of the named test's body when it is defined exactly once, else None.
+
+    The body runs from the `def` line to the line before the next top-level or same-depth
+    `def`/`class`, so a citation of any line inside the test counts as a citation of the test.
+    """
+    short = short_test_name(name)
+    if not short:
+        return None
+    lines = text.splitlines()
+    starts = [
+        i
+        for i, line in enumerate(lines, 1)
+        if re.match(rf"\s*(?:async\s+)?def\s+{re.escape(short)}\s*\(", line)
+    ]
+    if len(starts) != 1:
+        return None
+    first = starts[0]
+    indent = len(lines[first - 1]) - len(lines[first - 1].lstrip())
+    last = len(lines)
+    for i in range(first + 1, len(lines) + 1):
+        line = lines[i - 1]
+        stripped = line.lstrip()
+        depth = len(line) - len(stripped)
+        if stripped and depth <= indent and re.match(r"(?:async\s+def|def|class|@)\b", stripped):
+            last = i - 1
+            break
+    return first, last
 
 
 class RefChecker:
@@ -192,6 +226,7 @@ class RefChecker:
         self.total = 0
         self.valid = 0
         self.rejected: list[dict] = []
+        self.relocated: list[dict] = []
 
     def _read(self, rel: str):
         if rel not in self._text:
@@ -224,6 +259,26 @@ class RefChecker:
             return None
         self.valid += 1
         return rel
+
+    def check_test(self, file, line, name: str) -> tuple[str, int | None] | None:
+        """Check a test citation and return (path, line), or None.
+
+        Agents sometimes give a test's position in the diff they read (diff.patch, context.md)
+        instead of its line in the file. When the named test is defined exactly once in that
+        test file and the cited line is outside its body, the citation is moved to its `def`
+        line rather than dropped. A name that isn't defined in the file is still rejected.
+        """
+        rel = repo_path(file)
+        text = self._read(rel) if rel else None
+        span = test_def_span(name, text) if text is not None else None
+        line_no = as_int(line)
+        if span and not (line_no is not None and span[0] <= line_no <= span[1]):
+            if self.check(file, span[0], name, want="test"):
+                self.relocated.append({"file": rel, "name": name, "from": line, "to": span[0]})
+                return rel, span[0]
+            return None
+        rel = self.check(file, line, name, want="test")
+        return (rel, line_no) if rel else None
 
 
 def parse_json_text(text: str):
