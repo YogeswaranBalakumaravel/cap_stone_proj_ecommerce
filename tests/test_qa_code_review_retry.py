@@ -60,12 +60,17 @@ def run_pass(tmp_path, monkeypatch):
     spec.loader.exec_module(run_passes)
 
     def run(pass_name, envelopes):
+        """Each envelope is a dict or list (written as the CLI's JSON), raw bytes, or an exception
+        for the CLI run to raise."""
         script = iter(envelopes)
         calls = []
 
         def fake_cli(args, stdout, **kwargs):
             calls.append(args)
-            stdout.write(json.dumps(next(script)).encode())
+            step = next(script)
+            if isinstance(step, BaseException):
+                raise step
+            stdout.write(step if isinstance(step, bytes) else json.dumps(step).encode())
             return subprocess.CompletedProcess(args, 0)
 
         monkeypatch.setattr(run_passes.subprocess, "run", fake_cli)
@@ -99,11 +104,44 @@ def test_successful_pass_runs_once(run_pass):
     assert meta["ok"] is True
 
 
+def test_pass_that_gave_up_in_a_list_envelope_is_run_again(run_pass):
+    stream = [{"type": "system", "subtype": "init"}, GAVE_UP]  # the CLI can emit a message list
+
+    code, runs, meta = run_pass("understand", [stream, DONE])
+
+    assert (code, runs) == (0, 2)
+    assert meta["ok"] is True
+
+
 def test_other_errors_are_not_retried(run_pass):
     code, runs, meta = run_pass("understand", [FAILED_OTHERWISE, DONE])
 
     assert (code, runs) == (1, 1)
     assert "error_max_turns" in meta["error"]
+
+
+def test_timeout_is_not_retried(run_pass):
+    timeout = subprocess.TimeoutExpired("claude", 1200)
+
+    code, runs, meta = run_pass("understand", [timeout, DONE])
+
+    assert (code, runs) == (1, 1)
+    assert meta["ok"] is False
+
+
+def test_missing_cli_is_not_retried(run_pass):
+    code, runs, meta = run_pass("understand", [FileNotFoundError("claude"), DONE])
+
+    assert (code, runs) == (1, 1)
+    assert "cli_missing" in meta["error"]
+
+
+@pytest.mark.parametrize("raw", [b"", b"not json", b"[]", b'"a string"'])
+def test_unreadable_output_is_not_retried(run_pass, raw):
+    code, runs, meta = run_pass("understand", [raw, DONE])
+
+    assert (code, runs) == (1, 1)
+    assert meta["ok"] is False
 
 
 def test_understand_prompt_asks_for_one_complete_submission():
