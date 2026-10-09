@@ -66,6 +66,8 @@ maintainability cost; `info` worth knowing. Confidence `high` when you traced it
 ## Citation rules (the gate checks every one)
 
 - `file` + `line` in the PR head; `evidence` copied exactly from that line (one line, ≤160 chars).
+- `line` is the line number in the file itself: open the file with Read and use its numbering.
+  A position in `diff.patch` or any other input file is not a source line number.
 - A finding should sit on a line the PR adds. For a defect that shows on unchanged code but is
   caused by the change, cite the unchanged line and fill `caused_by` with the changed line.
 - Corroboration is checked mechanically: a `taint_source` line must read untrusted input; an

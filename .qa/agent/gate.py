@@ -113,24 +113,16 @@ def validated_review(review, refs: RefChecker) -> dict:
         out = []
         for t in value if isinstance(value, list) else []:
             if isinstance(t, dict):
-                rel = refs.check(
-                    t.get("file"), t.get("line"), str(t.get("name") or ""), want="test"
-                )
-                if rel:
-                    out.append(
-                        {
-                            "file": rel,
-                            "line": as_int(t.get("line")),
-                            "name": str(t.get("name") or ""),
-                        }
-                    )
+                hit = refs.check_test(t.get("file"), t.get("line"), str(t.get("name") or ""))
+                if hit:
+                    out.append({"file": hit[0], "line": hit[1], "name": str(t.get("name") or "")})
         return out
 
     tests = []
     for t in rows("tests"):
-        rel = refs.check(t.get("file"), t.get("line"), str(t.get("name") or ""), want="test")
-        if rel:
-            tests.append({**t, "file": rel})
+        hit = refs.check_test(t.get("file"), t.get("line"), str(t.get("name") or ""))
+        if hit:
+            tests.append({**t, "file": hit[0], "line": hit[1]})
     criteria = []
     for c in rows("criteria"):
         found = tests_of(c.get("tests"))
@@ -1034,6 +1026,16 @@ def render(
             )
         out += ["", "</details>", ""]
 
+    if refs.relocated:
+        out += [
+            "<details><summary>Test citations moved to the test's definition "
+            f"({len(refs.relocated)})</summary>",
+            "",
+        ]
+        for r in refs.relocated[:20]:
+            out.append(f"- {code(r['name'])} in {code(r['file'])}: line {r['from']} → {r['to']}")
+        out += ["", "</details>", ""]
+
     th = cfg["thresholds"]
     out += [
         "<details><summary>How the metrics are calculated</summary>",
@@ -1061,8 +1063,9 @@ def render(
             else ": reported, not required."
         ),
         "- A citation is verified when the file exists, the line is in range and, for tests, the "
-        "test name "
-        "is in a test file. Claims that fail this are dropped before anything is counted.",
+        "test name is in a test file. A test cited at a line outside its body (usually a position "
+        "in the diff) is moved to its `def` line when the name is defined exactly once in that "
+        "file. Claims that fail this are dropped before anything is counted.",
         "",
         "</details>",
         "",
@@ -1167,6 +1170,7 @@ def main() -> int:
                 "verified": refs.valid,
                 "validity": ratio(refs.valid, refs.total),
                 "rejected": refs.rejected,
+                "relocated": refs.relocated,
             },
             "agent": [m for m in metas if m],
             "agent_confidence": rv["confidence"],

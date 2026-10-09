@@ -43,6 +43,7 @@ from cr_common import (
 )
 
 MARKER = "<!-- code-review-agent -->"
+RELOCATE_MIN_CHARS = 12  # shortest quote that may move a citation to its one matching line
 ICON = {"blocker": "🛑", "high": "🔴", "medium": "🟠", "low": "🟡", "info": "🔵"}
 STATUS_ICON = {
     "BLOCK": "❌",
@@ -79,7 +80,7 @@ class Verifier:
         text = self.lines(rel)
         if text is None:
             return None, None, "file not found in the PR head"
-        if n is None or not 1 <= n <= max(1, len(text)):
+        if n is None:
             return None, None, f"line {cite.get('line')} is out of range"
         want = norm(cite.get("evidence", "")).rstrip(".…").strip()
         if len(want) < 4:
@@ -89,6 +90,16 @@ class Verifier:
             if 1 <= k <= len(text) and want in norm(text[k - 1]):
                 self.stats[f"{kind}_valid"] += 1
                 return rel, k, ""
+        # Agents sometimes give the line's position in the diff they read (diff.patch) instead of
+        # its line in the file. Quoted text that occurs on exactly one line of the file still
+        # pins the citation down, so move it there; ambiguous or short quotes are still rejected.
+        hits = [k for k, line in enumerate(text, 1) if want in norm(line)]
+        if len(want) >= RELOCATE_MIN_CHARS and len(hits) == 1:
+            self.stats[f"{kind}_valid"] += 1
+            self.stats[f"{kind}_relocated"] += 1
+            return rel, hits[0], ""
+        if not 1 <= n <= max(1, len(text)):
+            return None, None, f"line {cite.get('line')} is out of range"
         return None, None, "quoted evidence isn't on or near that line"
 
     def changed(self, rel: str, n: int) -> bool:
@@ -801,10 +812,13 @@ def main() -> int:
         f"{env.get('GITHUB_SERVER_URL', '')}/{env.get('GITHUB_REPOSITORY', '')}"
         f"/actions/runs/{env.get('GITHUB_RUN_ID', '')}"
     )
+    moved = sum(n for k, n in v.stats.items() if k.endswith("_relocated"))
     out += [
         "",
         f"<sub>Commit {env.get('HEAD_SHA', '')[:7] or 'local'} · citations valid "
-        f"{v.stats['finding_valid']}/{v.stats['finding_total']} · cost ${metrics['cost_usd']:.2f}"
+        f"{v.stats['finding_valid']}/{v.stats['finding_total']}"
+        + (f" ({moved} moved from a diff position to the quoted line)" if moved else "")
+        + f" · cost ${metrics['cost_usd']:.2f}"
         + (f" · [run]({run})" if env.get("GITHUB_RUN_ID") else "")
         + f" · checks from [{cfg['checklist']['source']}]({cfg['checklist']['url']})</sub>",
     ]
