@@ -95,6 +95,24 @@ def test_test_cited_inside_another_test_moves_to_its_own_def(tq):
     assert hit == ("tests/test_sample.py", SECOND_DEF)
 
 
+@pytest.mark.parametrize(
+    ("cited", "kept"),
+    [
+        (FIRST_DEF, FIRST_DEF),  # first line of the body: kept
+        (SECOND_DEF - 2, SECOND_DEF - 2),  # last line before the next test's decorator: kept
+        (SECOND_DEF - 1, FIRST_DEF),  # the next test's decorator: outside, moved to the def
+        (FIRST_DEF - 1, FIRST_DEF),  # the line before the def: outside, moved to the def
+    ],
+)
+def test_test_body_boundaries(tq, cited, kept):
+    _, refs = tq
+
+    assert refs.check_test("tests/test_sample.py", cited, "test_first") == (
+        "tests/test_sample.py",
+        kept,
+    )
+
+
 def test_test_name_not_defined_in_the_file_is_rejected(tq):
     _, refs = tq
 
@@ -187,10 +205,18 @@ def test_quote_on_several_lines_is_not_moved(verifier):
     assert reason == "quoted evidence isn't on or near that line"
 
 
-def test_short_quote_is_not_moved(verifier):
-    rel, _, _ = verifier.check(cite(1, "n > 0"), "oracle")  # unique, but under 12 characters
+@pytest.mark.parametrize(
+    ("quote", "expected"),
+    [
+        ("n > 0", None),  # unique, but far under 12 characters
+        ("ert value =", None),  # unique, 11 characters: one short of the minimum
+        ("assert n > 0", ("tests/test_sample.py", SECOND_DEF + 1, "")),  # unique, exactly 12
+    ],
+)
+def test_quote_must_be_at_least_12_characters_to_move(verifier, quote, expected):
+    result = verifier.check(cite(1, quote), "oracle")
 
-    assert rel is None
+    assert (result if expected else result[0]) == expected
 
 
 @pytest.mark.parametrize(
