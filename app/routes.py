@@ -1,8 +1,8 @@
-"""Blueprint: catalog index, phone detail, two-phone comparison, JSON API, health check."""
+"""Blueprint: phone and earbud catalogs, details, two-phone comparison, JSON API, health check."""
 from flask import Blueprint, abort, jsonify, render_template, request
 
 from .extensions import db
-from .models import Phone
+from .models import Earbud, Phone
 
 main_bp = Blueprint("main", __name__)
 
@@ -26,19 +26,28 @@ COMPARE_SPECS = [
 ]
 
 
-def _query_phones(brand, sort):
-    query = Phone.query
+def _query_catalog(model, brand, sort):
+    """Shared brand filter and sort for every catalog model (Phone, Earbud)."""
+    query = model.query
     if brand in VALID_BRANDS:
         query = query.filter_by(brand=brand)
 
     if sort == "price":
-        query = query.order_by(Phone.price_usd.asc())
+        query = query.order_by(model.price_usd.asc())
     elif sort == "release_date":
-        query = query.order_by(Phone.release_date.desc())
+        query = query.order_by(model.release_date.desc())
     else:
-        query = query.order_by(Phone.brand.asc(), Phone.price_usd.desc())
+        query = query.order_by(model.brand.asc(), model.price_usd.desc())
 
     return query.all()
+
+
+def _query_phones(brand, sort):
+    return _query_catalog(Phone, brand, sort)
+
+
+def _query_earbuds(brand, sort):
+    return _query_catalog(Earbud, brand, sort)
 
 
 class CompareError(Exception):
@@ -188,6 +197,34 @@ def api_phones():
     sort = request.args.get("sort")
     phones = _query_phones(brand, sort)
     return jsonify([p.to_dict() for p in phones])
+
+
+@main_bp.route("/earbuds")
+def earbuds():
+    brand = request.args.get("brand")
+    sort = request.args.get("sort")
+    return render_template(
+        "earbuds.html",
+        earbuds=_query_earbuds(brand, sort),
+        catalog_endpoint="main.earbuds",
+        current_brand=brand if brand in VALID_BRANDS else "All",
+        current_sort=sort if sort in VALID_SORTS else "",
+    )
+
+
+@main_bp.route("/earbuds/<int:earbud_id>")
+def earbud_detail(earbud_id):
+    earbud = db.session.get(Earbud, earbud_id)
+    if earbud is None:
+        abort(404)
+    return render_template("earbud_detail.html", earbud=earbud, catalog_endpoint="main.earbuds")
+
+
+@main_bp.route("/api/earbuds")
+def api_earbuds():
+    brand = request.args.get("brand")
+    sort = request.args.get("sort")
+    return jsonify([e.to_dict() for e in _query_earbuds(brand, sort)])
 
 
 @main_bp.route("/healthz")

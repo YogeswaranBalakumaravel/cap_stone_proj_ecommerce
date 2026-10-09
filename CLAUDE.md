@@ -5,7 +5,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## What this is
 
 Flagship Phones Showcase — a small Flask app cataloging current Apple and Samsung
-flagship phones (filter by brand, sort by price/release date, per-phone detail page).
+flagship phones (filter by brand, sort by price/release date, per-phone detail page),
+plus a second catalog page for wireless earbuds (Apple AirPods so far).
 It's a capstone project whose real purpose is exercising a CI gating pipeline
 (lint → security scan → tests → deploy), so keep changes consistent with that
 pipeline passing cleanly. See `spec.md` for the original design spec.
@@ -37,8 +38,9 @@ from `app/routes.py`, and — inside `app_context()` — calls `db.create_all()`
 
 **Reseed-on-boot is deliberate, not incidental**: Render's free tier doesn't
 guarantee disk persistence across deploys/restarts, so instead of a migration/seed
-step, the app just reseeds SQLite from `app/seed_data.py` every time it boots if
-the `phones` table is empty (`seed_if_empty()` no-ops otherwise). Don't "fix" this
+step, the app just reseeds SQLite from `app/seed_data.py` every time it boots,
+filling each of the `phones` and `earbuds` tables only if it's empty
+(`seed_if_empty()` checks them separately and no-ops for a non-empty table). Don't "fix" this
 into a one-time seed — it's the intended persistence strategy for this deployment
 target.
 
@@ -50,11 +52,14 @@ across requests within a test. Keep this in mind if you ever touch DB config:
 breaking the shared-connection pin will make seeded rows invisible to test
 requests without an obvious error.
 
-**Single blueprint, single model**: all routes live in `app/routes.py`
-(`main_bp`), all data in the one `Phone` model (`app/models.py`). `_query_phones()`
-in `routes.py` is the shared filter/sort logic behind both the HTML route (`/`)
-and the JSON route (`/api/phones`) — extend that one function rather than
-duplicating filter logic between the two.
+**Single blueprint, one model per catalog**: all routes live in `app/routes.py`
+(`main_bp`); data lives in `Phone` and `Earbud` (`app/models.py`), kept as separate
+models because phones and earbuds share few spec fields (see `Specification/tws.md`).
+`_query_catalog(model, brand, sort)` in `routes.py` is the shared filter/sort logic
+behind every HTML and JSON catalog route (`_query_phones()`/`_query_earbuds()` just
+pick the model) — extend that one function rather than duplicating filter logic.
+`base.html` points its brand tabs at whichever catalog the page passes as
+`catalog_endpoint` (default: the phone catalog).
 
 **Routes**: `/` (catalog, `?brand=`, `?sort=`), `/phone/<id>` (detail, 404 if
 missing), `/api/phones` (same filters as `/`, JSON via `Phone.to_dict()`),
@@ -62,12 +67,15 @@ missing), `/api/phones` (same filters as `/`, JSON via `Phone.to_dict()`),
 which both assume it exists). `/compare?ids=a,b` and `/api/compare?ids=a,b` show two phones side
 by side; both use `_compare_phones()` in `routes.py` (400 for bad `ids`, 404 for an
 unknown phone), and `/?compare=<id>` opens the catalog with that phone ticked.
+`/earbuds` (same `?brand=`/`?sort=`), `/earbuds/<id>` (404 if missing) and `/api/earbuds`
+are the earbuds catalog; only Apple AirPods are seeded so far.
 
 **Seed data** (`app/seed_data.py`): a plain list of `dict(...)` phone records —
 hand-edited, not fetched from any API, and explicitly *not* meant to track real
 pricing/specs over time. When adding phones, follow the existing field shape
 (`storage_options_gb` as a comma-separated string, parsed via
-`Phone.storage_options_list`).
+`Phone.storage_options_list`). `EARBUDS` works the same way; for over-ear headphones
+with no charging case (AirPods Max), both battery fields hold the single-charge figure.
 
 ## CI/CD
 

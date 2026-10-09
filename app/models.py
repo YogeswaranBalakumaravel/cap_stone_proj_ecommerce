@@ -45,3 +45,45 @@ class Phone(db.Model):
 
     def __repr__(self):
         return f"<Phone {self.brand} {self.model_name}>"
+
+
+class Earbud(db.Model):
+    """Wireless earbuds and headphones; kept apart from Phone (see Specification/tws.md)."""
+
+    __tablename__ = "earbuds"
+
+    id = db.Column(db.Integer, primary_key=True)
+    brand = db.Column(db.String(20), nullable=False)
+    model_name = db.Column(db.String(80), nullable=False)
+    tier = db.Column(db.String(20), nullable=False, default="Standard")
+    release_date = db.Column(db.Date, nullable=False, default=date.today)
+    price_usd = db.Column(db.Float, nullable=False, default=0.0)
+    chip = db.Column(db.String(60), nullable=False, default="")
+    battery_hours_earbuds = db.Column(db.Float, nullable=False, default=0.0)
+    battery_hours_with_case = db.Column(db.Float, nullable=False, default=0.0)
+    noise_cancellation = db.Column(db.Boolean, nullable=False, default=False)
+    water_resistance_rating = db.Column(db.String(20), nullable=False, default="")
+    connector_type = db.Column(db.String(20), nullable=False, default="")
+    image_url = db.Column(db.String(200), nullable=False, default="")
+    is_current = db.Column(db.Boolean, nullable=False, default=True)
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "brand": self.brand,
+            "model_name": self.model_name,
+            "tier": self.tier,
+            "release_date": self.release_date.isoformat() if self.release_date else None,
+            "price_usd": self.price_usd,
+            "chip": self.chip,
+            "battery_hours_earbuds": self.battery_hours_earbuds,
+            "battery_hours_with_case": self.battery_hours_with_case,
+            "noise_cancellation": self.noise_cancellation,
+            "water_resistance_rating": self.water_resistance_rating,
+            "connector_type": self.connector_type,
+            "image_url": self.image_url,
+            "is_current": self.is_current,
+        }
+
+    def __repr__(self):
+        return f"<Earbud {self.brand} {self.model_name}>"
