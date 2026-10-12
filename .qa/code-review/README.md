@@ -5,8 +5,8 @@ checks of the organisation's
 [Checklist for AI-Assisted Applications](https://celestialsys.atlassian.net/wiki/spaces/DA/pages/3846176779).
 It sits next to the test quality agent (`.qa/agent/`) and shares its sign-in.
 
-Ground rules, unchanged: Python standard library only, no API keys or OAuth tokens (keyless OIDC
-via `QA_PROVIDER`), loaded from the base branch so a PR can't weaken its own review, and blocking
+Ground rules, unchanged: Python standard library only, no API keys (keyless OIDC via `QA_PROVIDER`,
+or `QA_PROVIDER=oauth` with the `CLAUDE_CODE_OAUTH_TOKEN` secret, see `.qa/agent/README.md`), loaded from the base branch so a PR can't weaken its own review, and blocking
 on `main`, `dev` and `staging`.
 
 ## How it reviews

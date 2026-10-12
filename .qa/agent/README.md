@@ -11,7 +11,7 @@ A headless Claude Code agent that runs in your CI pipeline on every pull request
 
 No third-party QA libraries are used. The scripts use only the Python standard library and git. The agent is the Claude Code CLI. The only command it runs against your code is your project's own test command, the one your developers already use.
 
-**No API keys and no OAuth tokens.** The agent signs in with the CI job's own short-lived GitHub OIDC identity, through Anthropic workload identity federation or your cloud account (Amazon Bedrock, Google Vertex AI, Microsoft Foundry). Nothing long-lived is stored anywhere. `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN` and `CLAUDE_CODE_OAUTH_TOKEN` are removed from the agent's environment even if someone sets them. With no provider configured, the pipeline runs in scripts-only mode.
+**No API keys.** By default the agent signs in with the CI job's own short-lived GitHub OIDC identity, through Anthropic workload identity federation or your cloud account (Amazon Bedrock, Google Vertex AI, Microsoft Foundry), and nothing long-lived is stored. The one exception is `QA_PROVIDER=oauth`, which signs in with a Claude seat's OAuth token stored as the repository secret `CLAUDE_CODE_OAUTH_TOKEN` (see [Claude seat OAuth token](#claude-seat-oauth-token-qa_provideroauth)). `ANTHROPIC_API_KEY` and `ANTHROPIC_AUTH_TOKEN` are always removed from the agent's environment, and `CLAUDE_CODE_OAUTH_TOKEN` is removed for every provider except `oauth`. With no provider configured, the pipeline runs in scripts-only mode.
 
 ## How it works
 
@@ -66,7 +66,7 @@ The thresholds are starting points. Tune them in `config.json` once you've calib
 ## Setup
 
 1. **Copy the files** into your repository: `.qa/agent/` and `.github/workflows/test-quality-agent.yml` (plus `.github/pull_request_template.md` if you want the acceptance-criteria section). Merge them to `main` first: the workflow loads the agent from the base branch, so a PR can't weaken its own review.
-2. **Choose how the agent signs in** (see [Signing in without keys](#signing-in-without-keys)): set the repository variable `QA_PROVIDER` to `anthropic`, `bedrock`, `vertex` or `foundry`, plus that provider's variables. Leave it unset, or set it to `none`, to run the scripts only.
+2. **Choose how the agent signs in** (see [Signing in without keys](#signing-in-without-keys)): set the repository variable `QA_PROVIDER` to `anthropic`, `bedrock`, `vertex` or `foundry`, plus that provider's variables, or to `oauth` with the secret `CLAUDE_CODE_OAUTH_TOKEN`. Leave it unset, or set it to `none`, to run the scripts only.
 3. **Set your test command and paths** in `config.json`: `tests.command`, `tests.targeted_command`, and the `paths` globs. The defaults suit a Python repository that uses pytest.
 4. **Edit the dependency step** in the workflow so that your tests can run.
 5. **Protect the gate.** Add a CODEOWNERS rule so that changes to the agent need QA approval:
@@ -79,7 +79,7 @@ The thresholds are starting points. Tune them in `config.json` once you've calib
 
 ## Signing in without keys
 
-The agent never uses `ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN`. It uses the job's GitHub OIDC token, exchanged for short-lived credentials by one of these providers. Pick one with the repository variable `QA_PROVIDER`. The IDs below are **repository variables** (Settings → Secrets and variables → Actions → Variables), not secrets.
+The agent never uses `ANTHROPIC_API_KEY`, and the providers below never use `CLAUDE_CODE_OAUTH_TOKEN`. They use the job's GitHub OIDC token, exchanged for short-lived credentials by one of these providers. Pick one with the repository variable `QA_PROVIDER`. The IDs below are **repository variables** (Settings → Secrets and variables → Actions → Variables), not secrets.
 
 A pull request's OIDC token has the subject `repo:ORG/REPO:pull_request`. Every trust rule below matches exactly that, so no other repository or event can use it.
 
@@ -123,6 +123,16 @@ A pull request's OIDC token has the subject `repo:ORG/REPO:pull_request`. Every 
 2. Assign that identity the **Azure AI User** role on the Foundry resource, and deploy a Claude model there.
 3. Set the variables `ANTHROPIC_FOUNDRY_RESOURCE`, `AZURE_CLIENT_ID`, `AZURE_TENANT_ID` and `QA_MODEL` (the deployment name).
 
+### Claude seat OAuth token (`QA_PROVIDER=oauth`)
+
+**This is not OIDC.** The token is long-lived and stored in GitHub, so it gives up the *nothing stored* property above, and usage counts against the seat's plan limits instead of API billing.
+
+1. Sign in to claude.ai with the seat's account and run `claude setup-token` locally. Note the expiry date it prints. The token starts with `sk-ant-oat`. An API key (`sk-ant-api…`) is refused at setup with a clear error.
+2. Store it under Settings → Secrets and variables → Actions → **New repository secret**, named `CLAUDE_CODE_OAUTH_TOKEN`. Then set the repository variable `QA_PROVIDER=oauth`.
+3. The workflows give the secret only to the agent steps, and only while `QA_PROVIDER=oauth`: `plan` and `review` here, and the three agent passes of the code review agent. The `evidence` job, which runs PR code, never sees it. GitHub masks it in logs, and `run_agent.py` also blanks it out of the agent's output before that becomes the PR comment or the evidence artifact.
+4. When the seat hits its usage limit or the token expires, the agent pass fails and the gate falls back to the scripts' evidence, just as when any provider is unavailable. Check the run log, because the PR comment won't say why.
+5. To stop, set `QA_PROVIDER` back to `none` (or to an OIDC provider), delete the secret, and revoke the token in the account's claude.ai settings.
+
 ### Scripts only (`QA_PROVIDER=none`, the default)
 
 The agent steps are skipped. The gate still runs coverage, the change-reverted check, systematic mutants and the assertion scan, and it can still block on them. Checks 2 to 4 show "agent off".
@@ -144,7 +154,7 @@ The agent steps are skipped. The gate still runs coverage, the change-reverted c
 | `probes.line_tolerance` | How far the script searches when the agent's line number is slightly off. |
 | `probes.min_valid_for_score` | The minimum number of valid probes before a mutation score is reported. |
 | `requirements.*` | Where acceptance criteria come from: the PR description heading, `files` (for example `docs/acceptance/*.md`), or Jira. Set `require: true` to fail check 2 when no criteria are given. |
-| `agent.provider` | How the agent signs in: `anthropic`, `bedrock`, `vertex`, `foundry` or `none` (default). The repository variable `QA_PROVIDER` overrides it. |
+| `agent.provider` | How the agent signs in: `anthropic`, `bedrock`, `vertex`, `foundry`, `oauth` or `none` (default). The repository variable `QA_PROVIDER` overrides it. |
 | `agent.model`, `max_turns`, `max_budget_usd`, `timeout_seconds` | The model (or the `QA_MODEL` variable), and cost, turn and time limits for each pass. |
 | `thresholds.*` | The pass marks for each metric. |
 | `blocking_dimensions` | Which checks can fail the job in blocking mode. The default is `business_scenarios` and `change_validation`. |

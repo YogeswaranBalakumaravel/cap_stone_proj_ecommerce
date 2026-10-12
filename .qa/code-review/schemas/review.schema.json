@@ -1,5 +1,4 @@
 {
- "$schema": "https://json-schema.org/draft/2020-12/schema",
  "type": "object",
  "required": [
   "summary",
@@ -317,6 +316,24 @@
      "note": {
       "type": "string"
      }
+    },
+    "if": {
+     "required": [
+      "status"
+     ],
+     "properties": {
+      "status": {
+       "enum": [
+        "asserted",
+        "asserted_differently"
+       ]
+      }
+     }
+    },
+    "then": {
+     "required": [
+      "test"
+     ]
     }
    }
   },

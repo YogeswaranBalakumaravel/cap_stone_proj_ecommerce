@@ -9,8 +9,9 @@
 #   3. gate.py                 verifies every citation, applies attestations, decides, reports
 #
 # Nothing here runs the PR's code, which is why one job can hold the OIDC token. Sign-in is shared
-# with the test quality agent (QA_PROVIDER: anthropic | bedrock | vertex | foundry | none); no API
-# keys, no OAuth tokens. With none, the deterministic checks still run and can still block.
+# with the test quality agent (QA_PROVIDER: anthropic | bedrock | vertex | foundry | oauth | none);
+# no API keys. oauth signs in with the repository secret CLAUDE_CODE_OAUTH_TOKEN, which only the
+# three agent steps receive. With none, the deterministic checks still run and can still block.
 #
 # Named human attestation: a reviewer with write access (not the author) approves the PR with a
 # line such as "attest: logic, tests". The review event re-runs only the gate on the stored
@@ -133,16 +134,22 @@ jobs:
       - name: 2a. Agent maps the existing code, the ask and the implementation
         if: steps.reuse.outputs.found != 'true'
         continue-on-error: true
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ vars.QA_PROVIDER == 'oauth' && secrets.CLAUDE_CODE_OAUTH_TOKEN || '' }}
         run: python3 "$CR_HOME/run_passes.py" understand
 
       - name: 2b. Agent writes the test oracle in a separate context
         if: steps.reuse.outputs.found != 'true'
         continue-on-error: true
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ vars.QA_PROVIDER == 'oauth' && secrets.CLAUDE_CODE_OAUTH_TOKEN || '' }}
         run: python3 "$CR_HOME/run_passes.py" oracle
 
       - name: 2c. Agent reviews the ten checks
         if: steps.reuse.outputs.found != 'true'
         continue-on-error: true
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ vars.QA_PROVIDER == 'oauth' && secrets.CLAUDE_CODE_OAUTH_TOKEN || '' }}
         run: python3 "$CR_HOME/run_passes.py" review
 
       - name: 3. Gate
