@@ -13,39 +13,48 @@ import sys
 from pathlib import Path
 
 import pytest
+from jsonschema import Draft7Validator
 
 QA = Path(__file__).resolve().parents[1] / ".qa"
 SCHEMA = json.loads((QA / "code-review" / "schemas" / "review.schema.json").read_text("utf-8"))
-ITEM = SCHEMA["properties"]["oracle_coverage"]["items"]
 TEST_FILE = "def test_ok():\n    assert compute(2) == 4\n"
+CITATION = {"file": "tests/test_x.py", "line": 2, "evidence": "assert compute(2) == 4"}
 
 
-def required_keys(item: dict) -> set[str]:
-    """The keys the schema requires for this oracle_coverage item, following its if/then."""
-    keys = set(ITEM["required"])
-    cond = ITEM["if"]
-    applies = all(k in item for k in cond.get("required", [])) and all(
-        item.get(k) in spec["enum"] for k, spec in cond["properties"].items() if k in item
-    )
-    if applies:
-        keys |= set(ITEM["then"]["required"])
-    return keys
+def coverage_errors(*items) -> list[str]:
+    """Validate items as the review's oracle_coverage against the whole real schema (Draft 7, as
+    the Claude CLI does) and return the error messages for those items."""
+    errors = Draft7Validator(SCHEMA).iter_errors({"oracle_coverage": list(items)})
+    return [e.message for e in errors if list(e.absolute_path)[:1] == ["oracle_coverage"]]
+
+
+def test_review_schema_is_a_valid_draft_7_schema():
+    Draft7Validator.check_schema(SCHEMA)
 
 
 @pytest.mark.parametrize("status", ["asserted", "asserted_differently"])
-def test_schema_requires_a_test_for_asserted_claims(status):
-    assert "test" in required_keys({"behaviour_id": "AC-1.B1", "status": status})
+def test_schema_rejects_an_asserted_claim_without_a_test(status):
+    errors = coverage_errors({"behaviour_id": "AC-1.B1", "status": status})
+
+    assert "'test' is a required property" in errors
+
+
+@pytest.mark.parametrize("status", ["asserted", "asserted_differently"])
+def test_schema_accepts_an_asserted_claim_with_a_test(status):
+    assert coverage_errors({"behaviour_id": "AC-1.B1", "status": status, "test": CITATION}) == []
 
 
 def test_schema_lets_missing_go_without_a_test():
-    assert required_keys({"behaviour_id": "AC-1.B1", "status": "missing"}) == {
-        "behaviour_id",
-        "status",
-    }
+    assert coverage_errors({"behaviour_id": "AC-1.B1", "status": "missing"}) == []
 
 
-def test_schema_test_citation_needs_file_line_and_evidence():
-    assert set(ITEM["properties"]["test"]["required"]) == {"file", "line", "evidence"}
+@pytest.mark.parametrize("dropped", ["file", "line", "evidence"])
+def test_schema_test_citation_needs_file_line_and_evidence(dropped):
+    test = {k: v for k, v in CITATION.items() if k != dropped}
+
+    errors = coverage_errors({"behaviour_id": "AC-1.B1", "status": "asserted", "test": test})
+
+    assert f"'{dropped}' is a required property" in errors
 
 
 def test_review_prompt_says_asserted_needs_a_test():
@@ -75,7 +84,7 @@ BEHAVIOURS = {
     "AC-2.B1": {"id": "AC-2.B1", "criterion": "AC-2", "kind": "negative", "then": "z",
                 "assumption": True},
 }
-GOOD = {"file": "tests/test_x.py", "line": 2, "evidence": "assert compute(2) == 4"}
+GOOD = CITATION
 
 
 def rows_for(gate, coverage):
@@ -90,6 +99,31 @@ def test_asserted_with_a_verified_test_counts(gate):
     assert rows["AC-1.B1"]["status"] == "asserted"
     assert rows["AC-1.B1"]["test"] == "tests/test_x.py:2"
     assert gaps == {}
+
+
+def test_asserted_differently_with_a_verified_test_stays_a_gap(gate):
+    claim = {"behaviour_id": "AC-1.B1", "status": "asserted_differently", "test": GOOD}
+
+    rows, gaps = rows_for(gate, [claim])
+
+    assert (rows["AC-1.B1"]["status"], rows["AC-1.B1"]["test"]) == (
+        "asserted_differently",
+        "tests/test_x.py:2",
+    )
+    assert [(b["id"], status, f"{rel}:{n}") for b, status, rel, n in gaps["AC-1"]] == [
+        ("AC-1.B1", "asserted_differently", "tests/test_x.py:2")
+    ]
+
+
+@pytest.mark.parametrize("review", [{}, {"oracle_coverage": None}, {"oracle_coverage": []}])
+def test_no_oracle_coverage_gives_no_rows_and_no_gaps(gate, review):
+    assert gate.oracle_coverage(review, BEHAVIOURS, gate.Verifier(3, {})) == ([], {})
+
+
+def test_dropped_claim_without_a_note_gets_only_the_reason(gate):
+    rows, _ = rows_for(gate, [{"behaviour_id": "AC-1.B1", "status": "asserted"}])
+
+    assert rows["AC-1.B1"]["note"] == "the agent said asserted, but it cited no test."
 
 
 @pytest.mark.parametrize("status", ["asserted", "asserted_differently"])
