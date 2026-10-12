@@ -53,8 +53,11 @@ adjudication is shown to the human attester; it doesn't change the gate).
 10. `tests_assert_requirements` — compare the PR's tests with the oracle. Fill `oracle_coverage`:
     for each oracle behaviour, is there a test that asserts it (`asserted`), one that tests it but
     expects something else (`asserted_differently` — a strong sign the test was written from the
-    code), or none (`missing`)? Flag tests that assert implementation details (private helpers,
-    exact SQL, call counts) instead of behaviour.
+    code), or none (`missing`)? For `asserted` and `asserted_differently`, `test` is required:
+    cite the assertion line (`file`, `line`, `evidence`) that checks the behaviour. A claim with
+    no test can't be verified and is rejected. If you can't point at one, the status is
+    `missing`. Flag tests that assert implementation details (private helpers, exact SQL, call
+    counts) instead of behaviour.
 
 ## Severity and confidence
 

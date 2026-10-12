@@ -122,6 +122,32 @@ def cell(s) -> str:
     return str(s or "").replace("|", "\\|").replace("\n", " ")
 
 
+def oracle_coverage(review: dict, behaviours: dict, v: Verifier) -> tuple[list, dict]:
+    """Rows for the oracle table, and the behaviours per criterion that no verified test asserts.
+
+    `asserted` or `asserted_differently` only counts with a test citation that checks out; any
+    other claim becomes `missing`, with a note saying which: no test cited, or a bad citation.
+    """
+    rows, gaps = [], defaultdict(list)
+    for item in review.get("oracle_coverage") or []:
+        if not isinstance(item, dict) or item.get("behaviour_id") not in behaviours:
+            continue
+        b = behaviours[item["behaviour_id"]]
+        trel, tn, why = (
+            v.check(item.get("test"), "oracle") if item.get("test") else (None, None, "")
+        )
+        status, note = item.get("status"), str(item.get("note") or "")
+        if status in ("asserted", "asserted_differently") and not trel:
+            dropped = f"the agent said {status}, but " + (
+                f"its test citation didn't check out ({why})" if why else "it cited no test"
+            )
+            status, note = "missing", f"{dropped}. {note}".strip()
+        rows.append({**b, "status": status, "test": f"{trel}:{tn}" if trel else "", "note": note})
+        if status != "asserted" and not b.get("assumption"):
+            gaps[b["criterion"]].append((b, status, trel, tn))
+    return rows, gaps
+
+
 def main() -> int:
     cfg = load_config()
     checks = cfg["checks"]
@@ -395,25 +421,7 @@ def main() -> int:
             )
 
     # Oracle coverage -> tests that don't assert the requirement.
-    oracle_rows, gaps = [], defaultdict(list)
-    for item in review.get("oracle_coverage") or []:
-        if not isinstance(item, dict) or item.get("behaviour_id") not in behaviours:
-            continue
-        b = behaviours[item["behaviour_id"]]
-        trel, tn, _ = v.check(item.get("test"), "oracle") if item.get("test") else (None, None, "")
-        status = item.get("status")
-        if status in ("asserted", "asserted_differently") and not trel:
-            status = "missing"
-        oracle_rows.append(
-            {
-                **b,
-                "status": status,
-                "test": f"{trel}:{tn}" if trel else "",
-                "note": item.get("note", ""),
-            }
-        )
-        if status != "asserted" and not b.get("assumption"):
-            gaps[b["criterion"]].append((b, status, trel, tn))
+    oracle_rows, gaps = oracle_coverage(review, behaviours, v)
     for cid, items in gaps.items():
         differently = [x for x in items if x[1] == "asserted_differently"]
         core = [x for x in items if x[0]["kind"] in ("positive", "negative")]
@@ -768,7 +776,7 @@ def main() -> int:
                 f"| {cell(r['id'])}{' *(assumption)*' if r.get('assumption') else ''} | "
                 f"{r['kind']} | "
                 f"{cell(r['then'])[:120]} | {mark.get(r['status'], '')} {r['status']} | "
-                f"{('`' + r['test'] + '`') if r['test'] else '—'} |"
+                f"{('`' + r['test'] + '`') if r['test'] else (cell(r['note'])[:160] or '—')} |"
             )
         out += ["</details>"]
     scope_rows = [x for x in review.get("scope_map") or [] if isinstance(x, dict)]
