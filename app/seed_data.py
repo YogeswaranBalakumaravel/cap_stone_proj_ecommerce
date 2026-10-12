@@ -1,4 +1,5 @@
-"""Seed data for current Apple and Samsung flagship phones (as of Sep 2026).
+"""Seed data for current Apple and Samsung flagship phones (as of Sep 2026),
+and Apple's current AirPods lineup (as of Oct 2026).
 
 Specs/prices change frequently -- treat this as a starting point to edit,
 not a maintained live feed. The foldable iPhone Duo goes on sale Oct 23, 2026
@@ -7,7 +8,7 @@ and is intentionally not seeded here yet (upcoming, not current).
 from datetime import date
 
 from .extensions import db
-from .models import Phone
+from .models import Earbud, Phone
 
 PHONES = [
     # --- Apple ---
@@ -113,9 +114,82 @@ PHONES = [
 ]
 
 
+# Apple's AirPods lineup after the Sep 2026 refresh: AirPods 5 replaced AirPods 4
+# and AirPods 4 (ANC), both discontinued Sep 9, 2026. Battery hours are with ANC on.
+# AirPods Max 2 are over-ear headphones with no charging case, so both battery
+# fields hold the same single-charge figure.
+EARBUDS = [
+    dict(
+        brand="Apple",
+        model_name="AirPods 5",
+        tier="Standard",
+        release_date=date(2026, 9, 18),
+        price_usd=129.0,
+        chip="H2",
+        battery_hours_earbuds=4.0,
+        battery_hours_with_case=20.0,
+        noise_cancellation=True,
+        water_resistance_rating="IP57",
+        connector_type="USB-C",
+        image_url="images/apple-earbuds.svg",
+        is_current=True,
+    ),
+    dict(
+        brand="Apple",
+        model_name="AirPods 5 with Wireless Charging Case",
+        tier="Standard",
+        release_date=date(2026, 9, 18),
+        price_usd=149.0,
+        chip="H2",
+        battery_hours_earbuds=5.0,
+        battery_hours_with_case=22.0,
+        noise_cancellation=True,
+        water_resistance_rating="IP57",
+        connector_type="USB-C",
+        image_url="images/apple-earbuds.svg",
+        is_current=True,
+    ),
+    dict(
+        brand="Apple",
+        model_name="AirPods Pro 3",
+        tier="Pro",
+        release_date=date(2025, 9, 19),
+        price_usd=249.0,
+        chip="H2",
+        battery_hours_earbuds=8.0,
+        battery_hours_with_case=24.0,
+        noise_cancellation=True,
+        water_resistance_rating="IP57",
+        connector_type="USB-C",
+        image_url="images/apple-earbuds.svg",
+        is_current=True,
+    ),
+    dict(
+        brand="Apple",
+        model_name="AirPods Max 2",
+        tier="Max",
+        release_date=date(2026, 4, 1),
+        price_usd=549.0,
+        chip="H2",
+        battery_hours_earbuds=20.0,
+        battery_hours_with_case=20.0,
+        noise_cancellation=True,
+        water_resistance_rating="",
+        connector_type="USB-C",
+        image_url="images/apple-earbuds.svg",
+        is_current=True,
+    ),
+]
+
+
 def seed_if_empty():
-    """Populate the phones table from PHONES if it's currently empty."""
-    if Phone.query.first() is not None:
-        return
-    db.session.add_all(Phone(**data) for data in PHONES)
+    """Populate each catalog table from its seed list if that table is currently empty.
+
+    The tables are checked separately, so a database that already holds phones
+    still gets the earbuds seeded on its next boot.
+    """
+    if Phone.query.first() is None:
+        db.session.add_all(Phone(**data) for data in PHONES)
+    if Earbud.query.first() is None:
+        db.session.add_all(Earbud(**data) for data in EARBUDS)
     db.session.commit()

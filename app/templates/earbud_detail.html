@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+
+{% block title %}{{ earbud.model_name }} &mdash; Flagship Phones Showcase{% endblock %}
+
+{% block content %}
+  <a class="back-link" href="{{ url_for('main.earbuds') }}">&larr; Back to earbuds</a>
+
+  <div class="detail-layout">
+    <div class="detail-image brand-{{ earbud.brand|lower }}">
+      <img src="{{ url_for('static', filename=earbud.image_url) }}" alt="{{ earbud.model_name }}">
+    </div>
+
+    <div class="detail-info">
+      <span class="badge tier-badge">{{ earbud.tier }}</span>
+      <h1>{{ earbud.model_name }}</h1>
+      <p class="card-brand">{{ earbud.brand }}</p>
+      <p class="detail-price">${{ '{:,.0f}'.format(earbud.price_usd) }} <span class="starting-at">starting price</span></p>
+
+      <table class="spec-table">
+        <tbody>
+          <tr><th>Release date</th><td>{{ earbud.release_date.strftime('%B %d, %Y') if earbud.release_date else '—' }}</td></tr>
+          <tr><th>Chip</th><td>{{ earbud.chip or '—' }}</td></tr>
+          <tr><th>Battery life</th><td>Up to {{ earbud.battery_hours_earbuds|round|int }} hours
+            {%- if earbud.battery_hours_with_case > earbud.battery_hours_earbuds %} ({{ earbud.battery_hours_with_case|round|int }} hours with case){% endif %}</td></tr>
+          <tr><th>Noise cancellation</th><td>{{ 'Active Noise Cancellation' if earbud.noise_cancellation else 'None' }}</td></tr>
+          <tr><th>Water resistance</th><td>{{ earbud.water_resistance_rating or 'Not rated' }}</td></tr>
+          <tr><th>Connector</th><td>{{ earbud.connector_type or '—' }}</td></tr>
+          <tr><th>Status</th><td>{{ 'Current model' if earbud.is_current else 'Not currently sold' }}</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+{% endblock %}

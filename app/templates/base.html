@@ -9,11 +9,16 @@
 <body>
   <header class="site-header">
     <div class="wrap">
+      {% set catalog = catalog_endpoint or 'main.index' %}
       <a class="brand" href="{{ url_for('main.index') }}">📱 Flagship Phones</a>
+      <nav class="sections">
+        <a href="{{ url_for('main.index') }}" class="{{ 'active' if catalog == 'main.index' else '' }}">Phones</a>
+        <a href="{{ url_for('main.earbuds') }}" class="{{ 'active' if catalog == 'main.earbuds' else '' }}">Earbuds</a>
+      </nav>
       <nav class="tabs">
-        <a href="{{ url_for('main.index') }}" class="{{ 'active' if current_brand == 'All' else '' }}">All</a>
-        <a href="{{ url_for('main.index', brand='Apple') }}" class="{{ 'active' if current_brand == 'Apple' else '' }}">Apple</a>
-        <a href="{{ url_for('main.index', brand='Samsung') }}" class="{{ 'active' if current_brand == 'Samsung' else '' }}">Samsung</a>
+        <a href="{{ url_for(catalog) }}" class="{{ 'active' if current_brand == 'All' else '' }}">All</a>
+        <a href="{{ url_for(catalog, brand='Apple') }}" class="{{ 'active' if current_brand == 'Apple' else '' }}">Apple</a>
+        <a href="{{ url_for(catalog, brand='Samsung') }}" class="{{ 'active' if current_brand == 'Samsung' else '' }}">Samsung</a>
       </nav>
     </div>
   </header>
