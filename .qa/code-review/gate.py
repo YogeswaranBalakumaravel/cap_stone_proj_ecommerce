@@ -43,6 +43,7 @@ from cr_common import (
 )
 
 MARKER = "<!-- code-review-agent -->"
+RELOCATE_MIN_CHARS = 12  # shortest quote that may move a citation to its one matching line
 ICON = {"blocker": "🛑", "high": "🔴", "medium": "🟠", "low": "🟡", "info": "🔵"}
 STATUS_ICON = {
     "BLOCK": "❌",
@@ -79,7 +80,7 @@ class Verifier:
         text = self.lines(rel)
         if text is None:
             return None, None, "file not found in the PR head"
-        if n is None or not 1 <= n <= max(1, len(text)):
+        if n is None:
             return None, None, f"line {cite.get('line')} is out of range"
         want = norm(cite.get("evidence", "")).rstrip(".…").strip()
         if len(want) < 4:
@@ -89,6 +90,16 @@ class Verifier:
             if 1 <= k <= len(text) and want in norm(text[k - 1]):
                 self.stats[f"{kind}_valid"] += 1
                 return rel, k, ""
+        # Agents sometimes give the line's position in the diff they read (diff.patch) instead of
+        # its line in the file. Quoted text that occurs on exactly one line of the file still
+        # pins the citation down, so move it there; ambiguous or short quotes are still rejected.
+        hits = [k for k, line in enumerate(text, 1) if want in norm(line)]
+        if len(want) >= RELOCATE_MIN_CHARS and len(hits) == 1:
+            self.stats[f"{kind}_valid"] += 1
+            self.stats[f"{kind}_relocated"] += 1
+            return rel, hits[0], ""
+        if not 1 <= n <= max(1, len(text)):
+            return None, None, f"line {cite.get('line')} is out of range"
         return None, None, "quoted evidence isn't on or near that line"
 
     def changed(self, rel: str, n: int) -> bool:
@@ -109,6 +120,32 @@ def code(s) -> str:
 
 def cell(s) -> str:
     return str(s or "").replace("|", "\\|").replace("\n", " ")
+
+
+def oracle_coverage(review: dict, behaviours: dict, v: Verifier) -> tuple[list, dict]:
+    """Rows for the oracle table, and the behaviours per criterion that no verified test asserts.
+
+    `asserted` or `asserted_differently` only counts with a test citation that checks out; any
+    other claim becomes `missing`, with a note saying which: no test cited, or a bad citation.
+    """
+    rows, gaps = [], defaultdict(list)
+    for item in review.get("oracle_coverage") or []:
+        if not isinstance(item, dict) or item.get("behaviour_id") not in behaviours:
+            continue
+        b = behaviours[item["behaviour_id"]]
+        trel, tn, why = (
+            v.check(item.get("test"), "oracle") if item.get("test") else (None, None, "")
+        )
+        status, note = item.get("status"), str(item.get("note") or "")
+        if status in ("asserted", "asserted_differently") and not trel:
+            dropped = f"the agent said {status}, but " + (
+                f"its test citation didn't check out ({why})" if why else "it cited no test"
+            )
+            status, note = "missing", f"{dropped}. {note}".strip()
+        rows.append({**b, "status": status, "test": f"{trel}:{tn}" if trel else "", "note": note})
+        if status != "asserted" and not b.get("assumption"):
+            gaps[b["criterion"]].append((b, status, trel, tn))
+    return rows, gaps
 
 
 def main() -> int:
@@ -384,25 +421,7 @@ def main() -> int:
             )
 
     # Oracle coverage -> tests that don't assert the requirement.
-    oracle_rows, gaps = [], defaultdict(list)
-    for item in review.get("oracle_coverage") or []:
-        if not isinstance(item, dict) or item.get("behaviour_id") not in behaviours:
-            continue
-        b = behaviours[item["behaviour_id"]]
-        trel, tn, _ = v.check(item.get("test"), "oracle") if item.get("test") else (None, None, "")
-        status = item.get("status")
-        if status in ("asserted", "asserted_differently") and not trel:
-            status = "missing"
-        oracle_rows.append(
-            {
-                **b,
-                "status": status,
-                "test": f"{trel}:{tn}" if trel else "",
-                "note": item.get("note", ""),
-            }
-        )
-        if status != "asserted" and not b.get("assumption"):
-            gaps[b["criterion"]].append((b, status, trel, tn))
+    oracle_rows, gaps = oracle_coverage(review, behaviours, v)
     for cid, items in gaps.items():
         differently = [x for x in items if x[1] == "asserted_differently"]
         core = [x for x in items if x[0]["kind"] in ("positive", "negative")]
@@ -757,7 +776,7 @@ def main() -> int:
                 f"| {cell(r['id'])}{' *(assumption)*' if r.get('assumption') else ''} | "
                 f"{r['kind']} | "
                 f"{cell(r['then'])[:120]} | {mark.get(r['status'], '')} {r['status']} | "
-                f"{('`' + r['test'] + '`') if r['test'] else '—'} |"
+                f"{('`' + r['test'] + '`') if r['test'] else (cell(r['note'])[:160] or '—')} |"
             )
         out += ["</details>"]
     scope_rows = [x for x in review.get("scope_map") or [] if isinstance(x, dict)]
@@ -801,10 +820,13 @@ def main() -> int:
         f"{env.get('GITHUB_SERVER_URL', '')}/{env.get('GITHUB_REPOSITORY', '')}"
         f"/actions/runs/{env.get('GITHUB_RUN_ID', '')}"
     )
+    moved = sum(n for k, n in v.stats.items() if k.endswith("_relocated"))
     out += [
         "",
         f"<sub>Commit {env.get('HEAD_SHA', '')[:7] or 'local'} · citations valid "
-        f"{v.stats['finding_valid']}/{v.stats['finding_total']} · cost ${metrics['cost_usd']:.2f}"
+        f"{v.stats['finding_valid']}/{v.stats['finding_total']}"
+        + (f" ({moved} moved from a diff position to the quoted line)" if moved else "")
+        + f" · cost ${metrics['cost_usd']:.2f}"
         + (f" · [run]({run})" if env.get("GITHUB_RUN_ID") else "")
         + f" · checks from [{cfg['checklist']['source']}]({cfg['checklist']['url']})</sub>",
     ]

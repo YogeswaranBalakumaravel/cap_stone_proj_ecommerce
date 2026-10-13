@@ -53,8 +53,11 @@ adjudication is shown to the human attester; it doesn't change the gate).
 10. `tests_assert_requirements` — compare the PR's tests with the oracle. Fill `oracle_coverage`:
     for each oracle behaviour, is there a test that asserts it (`asserted`), one that tests it but
     expects something else (`asserted_differently` — a strong sign the test was written from the
-    code), or none (`missing`)? Flag tests that assert implementation details (private helpers,
-    exact SQL, call counts) instead of behaviour.
+    code), or none (`missing`)? For `asserted` and `asserted_differently`, `test` is required:
+    cite the assertion line (`file`, `line`, `evidence`) that checks the behaviour. A claim with
+    no test can't be verified and is rejected. If you can't point at one, the status is
+    `missing`. Flag tests that assert implementation details (private helpers, exact SQL, call
+    counts) instead of behaviour.
 
 ## Severity and confidence
 
@@ -66,6 +69,8 @@ maintainability cost; `info` worth knowing. Confidence `high` when you traced it
 ## Citation rules (the gate checks every one)
 
 - `file` + `line` in the PR head; `evidence` copied exactly from that line (one line, ≤160 chars).
+- `line` is the line number in the file itself: open the file with Read and use its numbering.
+  A position in `diff.patch` or any other input file is not a source line number.
 - A finding should sit on a line the PR adds. For a defect that shows on unchanged code but is
   caused by the change, cite the unchanged line and fill `caused_by` with the changed line.
 - Corroboration is checked mechanically: a `taint_source` line must read untrusted input; an
