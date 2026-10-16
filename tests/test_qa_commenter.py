@@ -335,6 +335,25 @@ def test_unknown_severity_is_treated_as_medium():
     assert F.finding("critical", False, "a.py", 1, "t")["severity"] == "medium"
 
 
+@pytest.mark.parametrize("line", [0, -1, True, "12", 1.5])
+def test_lines_that_arent_positive_integers_are_dropped(line):
+    assert F.finding("high", True, "a.py", line, "t")["line"] is None
+
+
+def test_junit_without_a_matching_traceback_line_falls_back_to_the_def_line():
+    xml = ('<testsuite><testcase classname="tests.test_routes" name="test_x" line="56">'
+           '<failure message="boom">no traceback here</failure></testcase></testsuite>')
+    assert F.parse_junit(xml)[0]["line"] == 57  # pytest's line attribute is 0-based
+
+
+def test_long_text_is_cut_to_the_cell_limits():
+    f = F.finding("high", True, "app/" + "p" * 200 + ".py", 1, "x" * 400)
+    row = next(line for line in F.render([gate("CI", found=[f])], "abc").splitlines()
+               if "| 🚫 |" in line)
+    assert re.search(r"\*\*(x+…)\*\*", row).group(1) == "x" * (F.MAX_TEXT - 1) + "…"
+    assert re.search(r"`(app/p+)`", row).group(1) == ("app/" + "p" * 200)[:120]
+
+
 # ---- rendering ----
 
 
@@ -369,6 +388,20 @@ def test_comment_says_gates_are_running_until_they_finish():
     assert "⏳ **Gates still running.**" in body
     assert "| A | ✅ Passed | 0 | 0 |" in body  # a finished gate with no findings: a real 0
     assert "| B | ⏳ Running | ? | ? |" in body
+
+
+def test_every_run_conclusion_has_a_label_and_timed_out_counts_as_failed():
+    gates = [
+        gate("T", conclusion="timed_out", found=None),
+        gate("C", conclusion="cancelled"),
+        gate("A", conclusion="action_required"),
+        gate("W", conclusion="weird"),
+    ]
+    body = F.render(gates, "abc1234")
+    assert "❌ **1 gate(s) failed:** T." in body
+    for row in ("| T | ❌ Timed out | ? | ? |", "| C | ⚪ Cancelled | 0 | 0 |",
+                "| A | ⏸️ Waiting for approval | 0 | 0 |", "| W | ⚪ weird | 0 | 0 |"):
+        assert row in body
 
 
 def test_comment_when_everything_passed_has_no_sections():
@@ -514,6 +547,60 @@ def test_artifact_file_over_the_size_cap_is_unreadable_not_clean(monkeypatch):
 def test_artifact_without_the_expected_file_is_unreadable_not_clean():
     with pytest.raises(ValueError, match="no metrics.json"):
         C.read_artifact(zipped({"report.md": "x"}), {"metrics.json": "test_quality"}, {})
+
+
+def test_check_titles_come_from_the_code_review_agents_config():
+    titles = C.check_titles()
+    assert titles["injection_surfaces"] == "Injection surfaces"
+    assert titles["plausible_logic"] == "Plausible-but-wrong logic"
+
+
+def test_check_titles_without_the_config_falls_back_to_none(monkeypatch, tmp_path):
+    monkeypatch.setattr(C, "HERE", tmp_path / "commenter")
+    assert C.check_titles() == {}
+
+
+def redirect(location):
+    return urllib.error.HTTPError("https://api/x", 302, "Found", {"Location": location}, None)
+
+
+def test_artifact_download_follows_the_redirect_without_the_token(monkeypatch):
+    gh = C.GitHub("o/r", "secret-token")
+    monkeypatch.setattr(gh, "_request", lambda *a, **k: (_ for _ in ()).throw(
+        redirect("https://storage.example/blob?sig=1")))
+    fetched = []
+
+    def urlopen(target, timeout):
+        fetched.append(target)
+        return io.BytesIO(b"zip bytes")
+
+    monkeypatch.setattr(C.urllib.request, "urlopen", urlopen)
+    assert gh.download("https://api/x") == b"zip bytes"
+    # A bare URL string, so no Authorization header goes to the storage host.
+    assert fetched == ["https://storage.example/blob?sig=1"]
+
+
+def test_artifact_download_refuses_a_non_https_redirect(monkeypatch):
+    gh = C.GitHub("o/r", "t")
+    monkeypatch.setattr(gh, "_request", lambda *a, **k: (_ for _ in ()).throw(
+        redirect("http://storage.example/blob")))
+    monkeypatch.setattr(C.urllib.request, "urlopen", lambda *a, **k: pytest.fail("fetched"))
+    with pytest.raises(ValueError, match="https"):
+        gh.download("https://api/x")
+
+
+def test_artifact_download_errors_other_than_redirects_propagate(monkeypatch):
+    gh = C.GitHub("o/r", "t")
+    gone = urllib.error.HTTPError("https://api/x", 410, "Gone", {}, None)
+    monkeypatch.setattr(gh, "_request", lambda *a, **k: (_ for _ in ()).throw(gone))
+    with pytest.raises(urllib.error.HTTPError):
+        gh.download("https://api/x")
+
+
+def test_artifact_download_without_a_redirect_returns_the_body(monkeypatch):
+    gh = C.GitHub("o/r", "t")
+    monkeypatch.setattr(gh, "_request", lambda *a, **k: io.BytesIO(b"direct"))
+    assert gh.download("https://api/x") == b"direct"
 
 
 def test_latest_runs_keeps_this_gates_pr_runs_newest_first():
