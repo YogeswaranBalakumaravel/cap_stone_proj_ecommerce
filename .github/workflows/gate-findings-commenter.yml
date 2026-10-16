@@ -1,0 +1,55 @@
+name: Gate findings commenter
+
+# Keeps one PR comment listing every gate's findings: lint and security scan (ruff, bandit), PR
+# tests (pytest), secret scan (Gitleaks), the test quality agent and the code review agent. It runs
+# each time one of those workflows finishes on a PR and edits the same comment, so the PR always
+# shows the latest result of each gate for its head commit. The code is in .qa/commenter/.
+#
+# workflow_run always runs this file and its code from the default branch (main), never from the
+# PR, so it can hold a write token even for fork PRs. That also means changes to it take effect
+# only once they reach main. Artifacts from fork PRs are read as data only (see commenter.py).
+# It never blocks a PR: each gate enforces its own result.
+
+on:
+  workflow_run:
+    workflows:
+      - CI
+      - CI - Dev
+      - CI - UAT
+      - PR Test Gate
+      - Gitleaks Secret Scan
+      - Test quality agent
+      - Code review agent
+    types: [completed]
+
+permissions: {}
+
+concurrency:
+  # Each run re-reads every gate, so a newer run for the same commit supersedes an older one.
+  group: gate-findings-${{ github.event.workflow_run.head_sha }}
+  cancel-in-progress: true
+
+jobs:
+  comment:
+    if: >-
+      github.event.workflow_run.event == 'pull_request' ||
+      github.event.workflow_run.event == 'pull_request_review'
+    runs-on: ubuntu-24.04
+    permissions:
+      actions: read # list runs and download their artifacts
+      contents: read
+      pull-requests: write # create and edit the comment
+    steps:
+      - name: Checkout the commenter
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+          sparse-checkout: |
+            .qa/commenter
+            .qa/code-review/config.json
+          sparse-checkout-cone-mode: false
+
+      - name: Post the gate findings
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 .qa/commenter/commenter.py

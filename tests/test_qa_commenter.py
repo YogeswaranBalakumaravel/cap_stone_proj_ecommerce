@@ -1,0 +1,514 @@
+"""The gate findings commenter (.qa/commenter) turns every gate's output into one PR comment.
+
+Covers each gate's parser against the output its tool really writes, what counts as blocking, the
+comment's escaping of PR-controlled text, keeping Gitleaks secrets out of the comment, reading
+artifacts, picking each gate's latest run, and editing only the commenter's own comment.
+"""
+
+import io
+import json
+import re
+import sys
+import zipfile
+from pathlib import Path
+
+import pytest
+
+HOME = Path(__file__).resolve().parents[1] / ".qa" / "commenter"
+sys.path.insert(0, str(HOME))
+
+import commenter as C  # noqa: E402
+import findings as F  # noqa: E402
+
+RUNNER = "/home/runner/work/cap_stone_proj_ecommerce/cap_stone_proj_ecommerce"
+
+RUFF = [
+    {
+        "code": "F401",
+        "message": "`os` imported but unused",
+        "filename": f"{RUNNER}/app/routes.py",
+        "location": {"row": 3, "column": 8},
+        "fix": {"applicability": "safe", "message": "Remove unused import: `os`", "edits": []},
+    },
+    {
+        "code": None,
+        "message": "SyntaxError: Expected an expression",
+        "filename": f"{RUNNER}/app/models.py",
+        "location": {"row": 12, "column": 1},
+        "fix": None,
+    },
+]
+
+BANDIT = {
+    "errors": [],
+    "results": [
+        {
+            "filename": "app/routes.py",
+            "line_number": 40,
+            "issue_severity": "HIGH",
+            "issue_confidence": "HIGH",
+            "issue_cwe": {"id": 78, "link": "https://cwe.mitre.org/data/definitions/78.html"},
+            "issue_text": "subprocess call with shell=True identified, security issue.",
+            "test_id": "B602",
+            "test_name": "subprocess_popen_with_shell_equals_true",
+        },
+        {
+            "filename": "app/seed_data.py",
+            "line_number": 2,
+            "issue_severity": "LOW",
+            "issue_confidence": "HIGH",
+            "issue_cwe": {"id": 78},
+            "issue_text": "Consider possible security implications of the subprocess module.",
+            "test_id": "B404",
+            "test_name": "blacklist",
+        },
+    ],
+}
+
+JUNIT = """<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests">
+<testsuite name="pytest" errors="1" failures="1" skipped="0" tests="3">
+<testcase classname="tests.test_routes" name="test_index_returns_200" time="0.01" />
+<testcase classname="tests.test_routes" name="test_unknown_phone_404" time="0.01">
+<failure message="assert 200 == 404&#10; +  where 200 = response.status_code">def test_x():
+&gt;       assert resp.status_code == 404
+E       assert 200 == 404
+
+tests/test_routes.py:57: AssertionError</failure></testcase>
+<testcase classname="tests.test_models.TestPhone" name="test_to_dict" time="0.01">
+<error message="failed on setup with &quot;fixture 'db' not found&quot;">fixture missing</error>
+</testcase>
+</testsuite></testsuites>"""
+
+SECRET = "ghp_EXAMPLEexampleEXAMPLEexample1234"
+SARIF = {
+    "runs": [
+        {
+            "results": [
+                {
+                    "ruleId": "github-pat",
+                    "message": {"text": "github-pat has detected secret for file config.py."},
+                    "locations": [
+                        {
+                            "physicalLocation": {
+                                "artifactLocation": {"uri": "config.py"},
+                                "region": {"startLine": 9, "snippet": {"text": SECRET}},
+                            }
+                        }
+                    ],
+                    "partialFingerprints": {"commitSha": "abc", "author": "someone"},
+                }
+            ]
+        }
+    ]
+}
+
+CODE_REVIEW = {
+    "findings": [
+        {"check": "injection_surfaces", "status": "BLOCK", "severity": "high",
+         "file": "app/routes.py", "line": 30, "title": "Raw SQL built from the query string",
+         "explanation": "brand is formatted into SQL.", "suggestion": "Use a bound parameter."},
+        {"check": "plausible_logic", "status": "NEEDS_ATTESTATION", "severity": "high",
+         "file": "app/routes.py", "line": 44, "title": "Sort order reversed",
+         "explanation": "price_desc sorts ascending.", "suggestion": "Use .desc()."},
+        {"check": "scope_creep", "status": "MUST_REVIEW", "severity": "medium",
+         "file": "app/models.py", "line": 5, "title": "Unrelated model change",
+         "explanation": "Not in the ticket.", "suggestion": "Split it out."},
+        {"check": "plausible_logic", "status": "ATTESTED", "severity": "high",
+         "file": "app/routes.py", "line": 50, "title": "Already approved", "explanation": "",
+         "suggestion": ""},
+    ]
+}
+TITLES = {
+    "injection_surfaces": "Injection surfaces",
+    "plausible_logic": "Plausible-but-wrong logic",
+}
+
+
+def tq_metrics(mode="blocking", status="FAIL", can_block=True):
+    return {
+        "mode": mode,
+        "dimensions": {
+            "edge_cases": {"status": status, "can_block": can_block},
+            "trivial_assertions": {"status": "PASS", "can_block": True},
+        },
+        "findings": [
+            {"dimension": "edge_cases", "severity": "high", "file": "tests/test_routes.py",
+             "line": 20, "title": "No test for an unknown brand",
+             "evidence": "Only apple and samsung are requested.",
+             "recommendation": "Request ?brand=nokia and assert the full catalog."},
+            {"dimension": "trivial_assertions", "severity": "low", "file": "tests/test_models.py",
+             "line": 8, "title": "assert True", "evidence": "", "recommendation": ""},
+        ],
+    }
+
+
+def gate(name="Gate", status="completed", conclusion="success", found=(), note="", url=None):
+    """A collected gate; found=None means its findings couldn't be read."""
+    return {"name": name, "status": status, "conclusion": conclusion, "url": url,
+            "findings": None if found is None else list(found), "note": note}
+
+
+def zipped(files: dict) -> bytes:
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as z:
+        for name, data in files.items():
+            z.writestr(name, data)
+    return buf.getvalue()
+
+
+# ---- parsers ----
+
+
+def test_ruff_findings_are_blocking_with_repo_relative_paths_and_fixes():
+    out = F.parse_ruff(RUFF)
+    assert [(f["file"], f["line"]) for f in out] == [("app/routes.py", 3), ("app/models.py", 12)]
+    assert out[0]["title"] == "F401: `os` imported but unused"
+    assert out[0]["fix"] == "Remove unused import: `os`"
+    assert out[1]["title"].startswith("syntax: SyntaxError")
+    assert out[1]["fix"] == ""
+    assert all(f["blocking"] and f["severity"] == "high" for f in out)
+
+
+def test_bandit_maps_severity_and_keeps_confidence_and_cwe():
+    out = F.parse_bandit(BANDIT)
+    assert [f["severity"] for f in out] == ["high", "low"]
+    assert out[0]["title"] == "B602 subprocess_popen_with_shell_equals_true"
+    assert out[0]["detail"].endswith("(confidence high, CWE-78)")
+    assert (out[0]["file"], out[0]["line"]) == ("app/routes.py", 40)
+    assert all(f["blocking"] for f in out)
+
+
+@pytest.mark.parametrize("data", [None, {}, {"results": []}, [], "not json"])
+def test_bandit_with_no_results_reports_nothing(data):
+    assert F.parse_bandit(data) == []
+
+
+def test_junit_reports_failed_and_errored_tests_at_the_failing_line():
+    out = F.parse_junit(JUNIT)
+    assert len(out) == 2  # the passing test isn't a finding
+    failed, errored = out
+    assert failed["title"] == "test_unknown_phone_404 failed"
+    assert (failed["file"], failed["line"]) == ("tests/test_routes.py", 57)
+    assert failed["detail"] == "assert 200 == 404"
+    assert failed["fix"] == (
+        "Run `pytest tests/test_routes.py::test_unknown_phone_404` locally to reproduce."
+    )
+    # A test class in the classname isn't part of the file path.
+    assert errored["file"] == "tests/test_models.py"
+    assert errored["title"] == "test_to_dict errored"
+    assert all(f["blocking"] and f["severity"] == "blocker" for f in out)
+
+
+def test_junit_that_isnt_xml_reports_nothing_instead_of_crashing():
+    assert F.parse_junit("<testsuites><testcase") == []
+
+
+def test_gitleaks_finding_never_carries_the_secret():
+    out = F.parse_sarif(SARIF)
+    assert len(out) == 1
+    assert out[0]["title"] == "Possible secret (github-pat)"
+    assert (out[0]["file"], out[0]["line"]) == ("config.py", 9)
+    assert out[0]["blocking"]
+    body = F.render([gate("Secret scan (Gitleaks)", conclusion="failure", found=out)], "a" * 40)
+    assert SECRET not in json.dumps(out)
+    assert SECRET not in body
+
+
+def test_code_review_blocks_on_block_and_needs_attestation_and_drops_attested():
+    out = F.parse_code_review(CODE_REVIEW, TITLES)
+    assert [f["title"] for f in out] == [
+        "[Injection surfaces] Raw SQL built from the query string",
+        "[Plausible-but-wrong logic] Sort order reversed",
+        "[scope creep] Unrelated model change",  # no title in config: the id, readable
+    ]
+    assert [f["blocking"] for f in out] == [True, True, False]
+    assert "`attest: plausible_logic`" in out[1]["detail"]
+    assert "doesn't block" in out[2]["detail"]
+    assert out[0]["fix"] == "Use a bound parameter."
+
+
+def test_test_quality_finding_blocks_only_when_its_dimension_fails_and_can_block():
+    out = F.parse_test_quality(tq_metrics())
+    assert [f["blocking"] for f in out] == [True, False]  # trivial_assertions passed
+    assert out[0]["title"] == "[edge cases] No test for an unknown brand"
+    assert out[0]["fix"] == "Request ?brand=nokia and assert the full catalog."
+
+
+@pytest.mark.parametrize(
+    "kwargs", [{"mode": "advisory"}, {"can_block": False}, {"status": "CONCERN"}]
+)
+def test_test_quality_finding_does_not_block_in_advisory_cases(kwargs):
+    assert not any(f["blocking"] for f in F.parse_test_quality(tq_metrics(**kwargs)))
+
+
+def test_unknown_severity_is_treated_as_medium():
+    assert F.finding("critical", False, "a.py", 1, "t")["severity"] == "medium"
+
+
+# ---- rendering ----
+
+
+def test_comment_headline_names_failed_gates_and_counts_blocking_findings():
+    lint = F.parse_ruff(RUFF)
+    cr = F.parse_code_review(CODE_REVIEW, TITLES)
+    body = F.render(
+        [
+            gate("Lint", conclusion="failure", found=lint, url="https://github.com/o/r/runs/1"),
+            gate("Code review agent", conclusion="success", found=cr),
+            gate("Secret scan", status=None, conclusion=None),
+        ],
+        "0123456789abcdef",
+        blob_url="https://github.com/o/r/blob/0123456789abcdef",
+        updated="2026-10-15 10:00 UTC",
+    )
+    assert body.startswith(F.MARKER)
+    assert "❌ **1 gate(s) failed:** Lint. 5 finding(s), 4 blocking." in body
+    assert "Commit `0123456` · updated 2026-10-15 10:00 UTC" in body
+    assert "| [Lint](https://github.com/o/r/runs/1) | ❌ Failed | 2 | 2 |" in body
+    assert "| Secret scan | ➖ Not run | 0 | 0 |" in body
+    link = "https://github.com/o/r/blob/0123456789abcdef/app/routes.py#L3"
+    assert f"[`app/routes.py:3`]({link})" in body
+    # A gate with nothing to say gets no section of its own.
+    assert "### Secret scan" not in body
+
+
+def test_comment_says_gates_are_running_until_they_finish():
+    body = F.render([gate("A"), gate("B", status="in_progress", conclusion=None)], "abc1234")
+    assert "⏳ **Gates still running.**" in body
+    assert "| B | ⏳ Running |" in body
+
+
+def test_comment_when_everything_passed_has_no_sections():
+    body = F.render([gate("A"), gate("B")], "abc1234")
+    assert "✅ **Every gate that ran passed.**" in body
+    assert "###" not in body
+
+
+def test_failed_gate_without_findings_points_to_the_log():
+    body = F.render([gate("CI", conclusion="failure")], "abc1234")
+    assert "### CI" in body
+    assert "failed without reporting findings" in body
+
+
+def test_unreadable_findings_show_as_unknown_not_zero():
+    body = F.render([gate("CI", conclusion="failure", found=None, note="Couldn't read it")], "abc")
+    assert "| CI | ❌ Failed | ? | ? |" in body
+    assert "Couldn't read it" in body
+
+
+def test_pr_controlled_text_cannot_inject_html_links_mentions_or_break_the_table():
+    hostile = F.finding(
+        "high", True, "app/x.py", 1,
+        "<img src=x onerror=alert(1)> | [click](javascript:alert(1)) @admin",
+        detail="line one\n| --- |\nline two",
+        fix="<details><summary>",
+    )
+    body = F.render([gate("CI", conclusion="failure", found=[hostile])], "abc1234")
+    row = next(line for line in body.splitlines() if "app/x.py" in line)
+    assert "<img" not in body and "<details>" not in body
+    assert "&lt;img src=x onerror=alert(1)&gt;" in row
+    assert "\\[click\\](javascript:" in row  # both brackets escaped, so no link forms
+    assert not re.search(r"(?<!\\)\]\(javascript:", body)
+    assert "@admin" not in body and "@‍admin" in row
+    assert row.count(" | ") == 4  # only the five columns' own separators; the text adds none
+
+
+@pytest.mark.parametrize("path", ["../../etc/passwd", "app/x.py) [y](https://evil.example"])
+def test_odd_paths_are_shown_but_never_linked(path):
+    body = F.render(
+        [gate("CI", conclusion="failure", found=[F.finding("high", True, path, 1, "t")])],
+        "abc1234", blob_url="https://github.com/o/r/blob/abc1234",
+    )
+    assert "https://github.com/o/r/blob/abc1234/" not in body
+    assert "evil.example)" not in body
+
+
+def test_blocking_findings_list_first_and_the_rest_collapse_past_the_row_limit():
+    rows = [F.finding("info", False, f"app/f{i}.py", i + 1, f"note {i}") for i in range(30)]
+    rows.append(F.finding("low", True, "app/z.py", 1, "the blocker"))
+    body = F.render([gate("CI", conclusion="failure", found=rows)], "abc1234")
+    table = [line for line in body.splitlines() if line.startswith("| 🚫") or "| 🔵" in line]
+    assert "the blocker" in table[0]
+    assert len(table) == F.MAX_ROWS
+    assert f"…and {31 - F.MAX_ROWS} more" in body
+
+
+def test_comment_stays_under_githubs_size_limit():
+    rows = [F.finding("high", True, "a.py", 1, "x" * 400, "y" * 400, "z" * 400)] * 25
+    gates = [gate(f"Gate {i}", conclusion="failure", found=rows) for i in range(40)]
+    body = F.render(gates, "abc1234")
+    assert len(body) <= F.MAX_BODY + 100
+    assert body.endswith("…truncated. See each gate's run.")
+
+
+# ---- commenter: artifacts, runs, comments ----
+
+
+def test_artifact_files_are_parsed_by_name_in_any_folder_and_others_ignored():
+    blob = zipped(
+        {
+            "ruff.json": json.dumps(RUFF),
+            "nested/bandit.json": "﻿" + json.dumps(BANDIT),  # a BOM doesn't break it
+            "../../evil.json": "{}",
+            "report.md": "ignored",
+        }
+    )
+    out = C.read_artifact(blob, {"ruff.json": "ruff", "bandit.json": "bandit"}, {})
+    assert sorted(f["title"].split(":")[0].split()[0] for f in out) == [
+        "B404", "B602", "F401", "syntax"
+    ]
+
+
+def test_artifact_files_over_the_size_cap_are_skipped(monkeypatch):
+    monkeypatch.setattr(C, "MAX_FILE", 10)
+    out = C.read_artifact(zipped({"ruff.json": json.dumps(RUFF)}), {"ruff.json": "ruff"}, {})
+    assert out == []
+
+
+def test_latest_runs_keeps_this_gates_pr_runs_newest_first():
+    runs = [
+        {"id": 1, "name": "CI - Dev", "event": "pull_request", "created_at": "2026-10-15T09:00Z"},
+        {"id": 2, "name": "CI - Dev", "event": "push", "created_at": "2026-10-15T11:00Z"},
+        {"id": 3, "name": "CI - Dev", "event": "pull_request", "created_at": "2026-10-15T10:00Z"},
+        {"id": 4, "name": "PR Test Gate", "event": "pull_request", "created_at": "2026-10-15T12Z"},
+    ]
+    assert [r["id"] for r in C.latest_runs(runs, ["CI", "CI - Dev"])] == [3, 1]
+
+
+class FakeGitHub(C.GitHub):
+    """GitHub with canned runs, artifacts and comments, recording what it would send."""
+
+    def __init__(self, runs=(), artifacts=None, blobs=None, comments=()):
+        super().__init__("o/r", "token")
+        self.runs, self.artifacts, self.blobs = list(runs), artifacts or {}, blobs or {}
+        self.comments, self.sent = list(comments), []
+
+    def runs_for(self, sha):
+        return self.runs
+
+    def run_artifacts(self, run_id):
+        return self.artifacts.get(run_id, [])
+
+    def download(self, url):
+        if isinstance(self.blobs[url], Exception):
+            raise self.blobs[url]
+        return self.blobs[url]
+
+    def pages(self, path, key=None, limit=10):
+        return self.comments
+
+    def _request(self, method, path, body=None, opener=None):
+        self.sent.append((method, path, body))
+        return io.BytesIO(b"{}")
+
+
+def run(rid, name, event="pull_request", status="completed", conclusion="success", at="T1"):
+    return {"id": rid, "name": name, "event": event, "status": status,
+            "conclusion": conclusion, "created_at": at, "html_url": f"https://x/runs/{rid}"}
+
+
+def test_collect_falls_back_to_the_earlier_run_when_the_review_rerun_kept_no_artifact():
+    gh = FakeGitHub(
+        runs=[
+            run(1, "Code review agent", at="T1", conclusion="failure"),
+            run(2, "Code review agent", event="pull_request_review", at="T2"),
+        ],
+        artifacts={1: [{"name": "code-review-evidence", "archive_download_url": "u1"}]},
+        blobs={"u1": zipped({"findings.json": json.dumps(CODE_REVIEW)})},
+    )
+    cr = next(g for g in C.collect(gh, "sha", TITLES) if g["name"] == "Code review agent")
+    assert cr["conclusion"] == "success" and cr["url"] == "https://x/runs/2"  # result: latest run
+    assert len(cr["findings"]) == 3  # findings: the run that kept them
+    assert "earlier run" in cr["note"]
+
+
+def test_collect_marks_gates_that_didnt_run_running_or_couldnt_be_read():
+    gh = FakeGitHub(
+        runs=[
+            run(1, "PR Test Gate", status="in_progress", conclusion=None),
+            run(2, "CI - Dev", conclusion="failure"),
+            run(3, "Test quality agent", conclusion="failure"),
+        ],
+        artifacts={
+            2: [{"name": "lint-security-report", "archive_download_url": "u2"}],
+            3: [{"name": "test-quality-evidence", "archive_download_url": "u3"}],
+        },
+        blobs={"u2": OSError("connection reset"), "u3": b"not a zip"},
+    )
+    gates = {g["name"]: g for g in C.collect(gh, "sha", {})}
+    assert gates["Secret scan (Gitleaks)"]["status"] is None
+    assert gates["PR tests (pytest)"]["status"] == "in_progress"
+    assert gates["PR tests (pytest)"]["findings"] == []
+    lint = gates["Lint and security scan (ruff, bandit)"]
+    assert lint["findings"] is None and "connection reset" in lint["note"]
+    assert gates["Test quality agent"]["findings"] is None
+
+
+def test_collect_notes_a_failed_run_that_kept_no_findings():
+    gh = FakeGitHub(runs=[run(1, "CI", conclusion="failure")])
+    lint = C.collect(gh, "sha", {})[0]
+    assert lint["findings"] == [] and "kept no findings file" in lint["note"]
+
+
+def test_comment_is_edited_in_place_and_only_the_bots_own():
+    quoted = {"id": 7, "user": {"login": "someone"}, "body": f"look: {F.MARKER}"}
+    ours = {"id": 9, "user": {"login": C.BOT}, "body": F.MARKER + " old"}
+    gh = FakeGitHub(comments=[ours, quoted])
+    assert gh.upsert_comment(5, F.MARKER + " new") == "updated comment 9"
+    assert gh.sent == [("PATCH", "/repos/o/r/issues/comments/9", {"body": F.MARKER + " new"})]
+
+
+def test_unchanged_comment_is_not_rewritten_and_a_missing_one_is_created():
+    same = FakeGitHub(comments=[{"id": 9, "user": {"login": C.BOT}, "body": F.MARKER}])
+    assert same.upsert_comment(5, F.MARKER) == "comment 9 already up to date"
+    assert same.sent == []
+    fresh = FakeGitHub(comments=[{"id": 7, "user": {"login": "someone"}, "body": F.MARKER}])
+    assert fresh.upsert_comment(5, "body") == "created a comment"
+    assert fresh.sent == [("POST", "/repos/o/r/issues/5/comments", {"body": "body"})]
+
+
+def test_find_pr_matches_a_fork_pr_by_its_head_commit():
+    gh = FakeGitHub(comments=[{"number": 3, "head": {"sha": "other"}},
+                              {"number": 8, "head": {"sha": "abc"}}])
+    assert gh.find_pr({"pull_requests": [{"number": 4}], "head_sha": "abc"}) == 4
+    assert gh.find_pr({"pull_requests": [], "head_sha": "abc"}) == 8
+    assert gh.find_pr({"pull_requests": [], "head_sha": "zzz"}) is None
+
+
+def test_main_ignores_runs_that_werent_for_a_pull_request(monkeypatch, tmp_path, capsys):
+    event = tmp_path / "event.json"
+    event.write_text(json.dumps({"workflow_run": {"event": "push", "head_sha": "abc"}}))
+    monkeypatch.setenv("GITHUB_REPOSITORY", "o/r")
+    monkeypatch.setenv("GH_TOKEN", "t")
+    monkeypatch.setenv("GITHUB_EVENT_PATH", str(event))
+    monkeypatch.setattr(C, "GitHub", lambda *a: pytest.fail("shouldn't call GitHub"))
+    assert C.main() == 0
+    assert "Not a pull request run" in capsys.readouterr().out
+
+
+def test_main_without_credentials_fails_loudly(monkeypatch):
+    for name in ("GITHUB_REPOSITORY", "GH_TOKEN", "GITHUB_TOKEN", "GITHUB_EVENT_PATH"):
+        monkeypatch.delenv(name, raising=False)
+    assert C.main() == 1
+
+
+def test_main_dry_run_prints_the_comment_and_writes_the_job_summary(monkeypatch, tmp_path, capsys):
+    event = tmp_path / "event.json"
+    event.write_text(json.dumps({"workflow_run": {
+        "event": "pull_request", "head_sha": "abc1234def", "pull_requests": [{"number": 5}],
+        "head_repository": {"full_name": "o/r"}}}))
+    summary = tmp_path / "summary.md"
+    gh = FakeGitHub(runs=[run(1, "CI - Dev", conclusion="failure")],
+                    artifacts={1: [{"name": "lint-security-report", "archive_download_url": "u"}]},
+                    blobs={"u": zipped({"ruff.json": json.dumps(RUFF)})})
+    env = {"GITHUB_REPOSITORY": "o/r", "GH_TOKEN": "t", "COMMENTER_DRY_RUN": "1",
+           "GITHUB_EVENT_PATH": str(event), "GITHUB_STEP_SUMMARY": str(summary)}
+    for name, value in env.items():
+        monkeypatch.setenv(name, value)
+    monkeypatch.setattr(C, "GitHub", lambda *a: gh)
+    assert C.main() == 0
+    out = capsys.readouterr().out
+    assert out.startswith(F.MARKER) and "F401" in out
+    assert gh.sent == []  # dry run: nothing posted
+    assert "F401" in summary.read_text(encoding="utf-8")
+    assert F.MARKER not in summary.read_text(encoding="utf-8")
