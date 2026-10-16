@@ -232,6 +232,11 @@ def gate_findings(gh: GitHub, spec: dict, mine: list[dict], titles: dict) -> tup
             if fnmatch.fnmatch(a.get("name", ""), spec["artifact"]) and not a.get("expired")
         ]
         if not arts:
+            # A clean pass of a tool that writes only on findings is a real 0. Checked before any
+            # fallback, so an earlier failed run's findings never show next to a pass.
+            if (run is latest and spec.get("clean_pass_keeps_nothing")
+                    and latest.get("conclusion") == "success"):
+                return [], ""
             continue
         found = []
         for a in arts:
@@ -240,8 +245,6 @@ def gate_findings(gh: GitHub, spec: dict, mine: list[dict], titles: dict) -> tup
             return found, ""
         return found, ("Findings are from an earlier run for this commit; the latest run "
                        "didn't keep its own.")
-    if spec.get("clean_pass_keeps_nothing") and latest.get("conclusion") == "success":
-        return [], ""
     return None, "No run for this commit kept a findings file. Open the run log for the result."
 
 

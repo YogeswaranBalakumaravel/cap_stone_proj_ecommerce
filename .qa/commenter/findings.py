@@ -270,8 +270,14 @@ def clean(text, limit: int = MAX_TEXT) -> str:
 
 
 def _code(text: str) -> str:
-    """Inline code that survives backticks in the text."""
-    text = clean(text, 120).replace("`", "'")
+    """Inline code for a table cell.
+
+    Inside backticks nothing renders as HTML, a link or a mention, so only what could end the span
+    or the cell is escaped; entity or bracket escapes would show literally. (The agents' gate.py
+    files have similar helpers; this one is separate so the commenter needs nothing else from .qa.)
+    """
+    text = re.sub(r"\s+", " ", str(text or "")).strip()[:120]
+    text = text.replace("`", "'").replace("|", "\\|")
     return f"`{text}`" if text else ""
 
 

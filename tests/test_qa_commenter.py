@@ -318,7 +318,17 @@ def test_test_quality_finding_blocks_only_when_its_dimension_fails_and_can_block
     "kwargs", [{"mode": "advisory"}, {"can_block": False}, {"status": "CONCERN"}]
 )
 def test_test_quality_finding_does_not_block_in_advisory_cases(kwargs):
-    assert not any(f["blocking"] for f in F.parse_test_quality(tq_metrics(**kwargs)))
+    out = F.parse_test_quality(tq_metrics(**kwargs))
+    # The same edge_cases finding that blocks by default is still reported, just not blocking.
+    assert [f["title"] for f in out][0] == "[edge cases] No test for an unknown brand"
+    assert [f["blocking"] for f in out] == [False, False]
+
+
+def test_code_review_status_outside_the_known_set_is_reported_but_never_blocks():
+    data = {"findings": [{"check": "logic", "status": "SOMETHING_NEW", "severity": "high",
+                          "file": "app/x.py", "line": 1, "title": "t"}]}
+    out = F.parse_code_review(data)
+    assert len(out) == 1 and out[0]["blocking"] is False
 
 
 def test_unknown_severity_is_treated_as_medium():
@@ -420,6 +430,49 @@ def test_blocking_findings_list_first_and_the_rest_collapse_past_the_row_limit()
     assert "the blocker" in table[0]
     assert len(table) == F.MAX_ROWS
     assert f"…and {31 - F.MAX_ROWS} more" in body
+
+
+@pytest.mark.parametrize("count, more", [(25, None), (26, 1)])
+def test_row_limit_boundary(count, more):
+    rows = [F.finding("info", False, f"app/f{i}.py", 1, f"note {i}") for i in range(count)]
+    body = F.render([gate("CI", found=rows)], "abc1234")
+    assert sum(1 for line in body.splitlines() if "| 🔵 info |" in line) == F.MAX_ROWS
+    if more is None:
+        assert "more in the run's evidence" not in body
+    else:
+        assert f"…and {more} more in the run's evidence." in body
+
+
+def test_more_blocking_findings_than_rows_still_shows_only_blocking_ones_and_counts_the_rest():
+    rows = [F.finding("high", True, f"app/b{i:02}.py", 1, f"blocker {i}") for i in range(30)]
+    rows += [F.finding("info", False, "app/n.py", 1, "note")]
+    body = F.render([gate("CI", conclusion="failure", found=rows)], "abc1234")
+    shown = [line for line in body.splitlines() if line.startswith("| 🚫 |")]
+    assert len(shown) == F.MAX_ROWS and "| 🔵 info |" not in body
+    assert "…and 6 more in the run's evidence." in body
+    assert "| CI | ❌ Failed | 31 | 30 |" in body  # counts cover everything, not just what's shown
+
+
+def test_ties_are_ordered_by_file_then_line():
+    rows = [F.finding("high", True, "app/b.py", 9, "b9"), F.finding("high", True, "app/a.py", 5,
+            "a5"), F.finding("high", True, "app/b.py", 2, "b2")]
+    assert [f["title"] for f in sorted(rows, key=F.sort_key)] == ["a5", "b2", "b9"]
+
+
+def test_finding_without_a_line_links_the_file_and_one_without_a_file_shows_a_dash():
+    body = F.render(
+        [gate("CI", conclusion="failure", found=[F.finding("high", True, "app/x.py", None, "a"),
+                                                 F.finding("high", True, None, None, "b")])],
+        "abc1234", blob_url="https://github.com/o/r/blob/abc1234",
+    )
+    assert "[`app/x.py`](https://github.com/o/r/blob/abc1234/app/x.py) |" in body
+    assert "| — | **b** |" in body
+
+
+def test_paths_in_code_spans_read_as_written():
+    f = F.finding("high", True, "app/a&b [1].py", 3, "t")
+    body = F.render([gate("CI", conclusion="failure", found=[f])], "abc1234")
+    assert "`app/a&b [1].py:3`" in body  # not &amp; or \[ inside the code span
 
 
 def test_comment_stays_under_githubs_size_limit():
@@ -563,6 +616,45 @@ def test_gitleaks_passing_without_a_sarif_is_a_real_zero_but_failing_without_one
     assert C.collect(leak, "sha", {})[2]["findings"] is None
 
 
+def test_a_passing_gitleaks_rerun_never_shows_an_earlier_runs_leaks():
+    gh = FakeGitHub(
+        runs=[run(1, "Gitleaks Secret Scan", at="T1", conclusion="failure"),
+              run(2, "Gitleaks Secret Scan", at="T2", conclusion="success")],
+        artifacts={1: [{"name": "gitleaks-results.sarif", "archive_download_url": "g"}]},
+        blobs={"g": zipped({"results.sarif": json.dumps(SARIF)})},
+    )
+    leak = C.collect(gh, "sha", {})[2]
+    assert leak["conclusion"] == "success" and leak["findings"] == [] and leak["note"] == ""
+
+
+def test_the_result_comes_from_the_newest_run_even_when_an_older_one_passed():
+    gh = FakeGitHub(
+        runs=[run(1, "PR Test Gate", at="T1", conclusion="success"),
+              run(2, "PR Test Gate", at="T2", conclusion="failure")],
+        artifacts={2: [{"name": "pytest-report", "archive_download_url": "p"}]},
+        blobs={"p": zipped({"pytest-report.xml": JUNIT})},
+    )
+    tests = C.collect(gh, "sha", {})[1]
+    assert tests["conclusion"] == "failure" and tests["url"] == "https://x/runs/2"
+    assert len(tests["findings"]) == 2 and tests["note"] == ""
+
+
+def test_runs_started_at_the_same_moment_are_ordered_by_id():
+    runs = [run(7, "CI", at="T1"), run(9, "CI", at="T1"), run(8, "CI", at="T1")]
+    assert [r["id"] for r in C.latest_runs(runs, ["CI"])] == [9, 8, 7]
+
+
+def test_an_unreadable_artifact_with_a_secret_in_it_leaves_the_secret_out_of_the_note():
+    gh = FakeGitHub(
+        runs=[run(1, "Gitleaks Secret Scan", conclusion="failure")],
+        artifacts={1: [{"name": "gitleaks-results.sarif", "archive_download_url": "g"}]},
+        blobs={"g": zipped({"results.sarif": '{"runs": [' + SECRET})},
+    )
+    leak = C.collect(gh, "sha", {})[2]
+    assert leak["findings"] is None and "Couldn't read" in leak["note"]
+    assert SECRET not in leak["note"] and SECRET not in F.render([leak], "abc1234")
+
+
 def test_gitleaks_sarif_artifact_is_read_under_its_own_name():
     gh = FakeGitHub(
         runs=[run(1, "Gitleaks Secret Scan", conclusion="failure")],
@@ -646,6 +738,12 @@ def test_unchanged_comment_is_not_rewritten_and_a_missing_one_is_created():
     fresh = FakeGitHub(comments=[{"id": 7, "user": {"login": "someone"}, "body": F.MARKER}])
     assert fresh.upsert_comment(5, "body") == "created a comment"
     assert fresh.sent == [("POST", "/repos/o/r/issues/5/comments", {"body": "body"})]
+
+
+def test_another_bot_comment_without_the_marker_is_left_alone():
+    other = FakeGitHub(comments=[{"id": 3, "user": {"login": C.BOT}, "body": "Deploy preview"}])
+    assert other.upsert_comment(5, F.MARKER) == "created a comment"
+    assert [m for m, *_ in other.sent] == ["POST"]
 
 
 def test_find_pr_matches_a_fork_pr_by_its_head_commit():
