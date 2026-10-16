@@ -290,8 +290,9 @@ def test_gitleaks_finding_never_carries_the_secret():
     assert (out[0]["file"], out[0]["line"]) == ("config.py", 9)
     assert out[0]["blocking"]
     body = F.render([gate("Secret scan (Gitleaks)", conclusion="failure", found=out)], "a" * 40)
-    assert SECRET not in json.dumps(out)
-    assert SECRET not in body
+    # Neither the secret nor the rest of what Gitleaks records about it reaches the comment.
+    for leaked in (SECRET, "has detected secret", "commitSha", "someone"):
+        assert leaked not in json.dumps(out) and leaked not in body
 
 
 def test_code_review_blocks_on_block_and_needs_attestation_and_drops_attested():
@@ -302,6 +303,9 @@ def test_code_review_blocks_on_block_and_needs_attestation_and_drops_attested():
         "[scope creep] Unrelated model change",  # no title in config: the id, readable
     ]
     assert [f["blocking"] for f in out] == [True, True, False]
+    # The attested finding is neither listed nor counted.
+    body = F.render([gate("Code review agent", found=out)], "abc1234")
+    assert "Already approved" not in body and "| Code review agent | ✅ Passed | 3 | 2 |" in body
     assert "`attest: plausible_logic`" in out[1]["detail"]
     assert "doesn't block" in out[2]["detail"]
     assert out[0]["fix"] == "Use a bound parameter."
@@ -337,7 +341,10 @@ def test_unknown_severity_is_treated_as_medium():
 
 @pytest.mark.parametrize("line", [0, -1, True, "12", 1.5])
 def test_lines_that_arent_positive_integers_are_dropped(line):
-    assert F.finding("high", True, "a.py", line, "t")["line"] is None
+    assert F.finding("high", True, "a.py", line, "t") == {
+        "severity": "high", "blocking": True, "file": "a.py", "line": None,
+        "title": "t", "detail": "", "fix": "",
+    }
 
 
 def test_junit_without_a_matching_traceback_line_falls_back_to_the_def_line():
@@ -484,6 +491,17 @@ def test_more_blocking_findings_than_rows_still_shows_only_blocking_ones_and_cou
     assert len(shown) == F.MAX_ROWS and "| 🔵 info |" not in body
     assert "…and 6 more in the run's evidence." in body
     assert "| CI | ❌ Failed | 31 | 30 |" in body  # counts cover everything, not just what's shown
+
+
+def test_forty_findings_with_five_blocking_list_those_five_first_and_note_fifteen_more():
+    rows = [F.finding("medium", False, f"app/n{i:02}.py", 1, f"note {i}") for i in range(35)]
+    rows += [F.finding("low", True, f"app/b{i}.py", 1, f"blocker {i}") for i in range(5)]
+    body = F.render([gate("CI", conclusion="failure", found=rows)], "abc1234")
+    shown = [line for line in body.splitlines() if line.startswith("| 🚫 |") or "| 🟠" in line]
+    assert len(shown) == 25
+    assert all(line.startswith("| 🚫 |") for line in shown[:5])
+    assert not any(line.startswith("| 🚫 |") for line in shown[5:])
+    assert "…and 15 more in the run's evidence." in body
 
 
 def test_ties_are_ordered_by_file_then_line():
@@ -726,6 +744,27 @@ def test_the_result_comes_from_the_newest_run_even_when_an_older_one_passed():
     assert len(tests["findings"]) == 2 and tests["note"] == ""
 
 
+def test_a_rerun_in_progress_hides_the_earlier_runs_findings_until_it_finishes():
+    gh = FakeGitHub(
+        runs=[run(1, "PR Test Gate", at="T1", conclusion="failure"),
+              run(2, "PR Test Gate", at="T2", status="in_progress", conclusion=None)],
+        artifacts={1: [{"name": "pytest-report", "archive_download_url": "p"}]},
+        blobs={"p": zipped({"pytest-report.xml": JUNIT})},
+    )
+    tests = C.collect(gh, "sha", {})[1]
+    assert tests["status"] == "in_progress" and tests["findings"] is None
+    assert "| ⏳ Running | ? | ? |" in F.render([tests], "abc1234")
+
+
+def test_runs_are_only_ever_listed_for_the_prs_head_commit(monkeypatch):
+    gh = C.GitHub("o/r", "t")
+    asked = []
+    monkeypatch.setattr(gh, "pages", lambda path, key=None, limit=10: asked.append(path) or [])
+    assert gh.runs_for("abc123") == []
+    # GitHub filters by head_sha, so another commit's runs never come back to fall back on.
+    assert asked == ["/repos/o/r/actions/runs?head_sha=abc123"]
+
+
 def test_runs_started_at_the_same_moment_are_ordered_by_id():
     runs = [run(7, "CI", at="T1"), run(9, "CI", at="T1"), run(8, "CI", at="T1")]
     assert [r["id"] for r in C.latest_runs(runs, ["CI"])] == [9, 8, 7]
@@ -825,6 +864,14 @@ def test_unchanged_comment_is_not_rewritten_and_a_missing_one_is_created():
     fresh = FakeGitHub(comments=[{"id": 7, "user": {"login": "someone"}, "body": F.MARKER}])
     assert fresh.upsert_comment(5, "body") == "created a comment"
     assert fresh.sent == [("POST", "/repos/o/r/issues/5/comments", {"body": "body"})]
+
+
+def test_a_spoofed_marker_in_someone_elses_comment_is_never_edited():
+    spoof = {"id": 7, "user": {"login": "github-actions"}, "body": F.MARKER + " fake"}
+    near = {"id": 8, "user": {"login": "someone[bot]"}, "body": F.MARKER}
+    gh = FakeGitHub(comments=[spoof, near])
+    assert gh.upsert_comment(5, F.MARKER + " real") == "created a comment"
+    assert gh.sent == [("POST", "/repos/o/r/issues/5/comments", {"body": F.MARKER + " real"})]
 
 
 def test_another_bot_comment_without_the_marker_is_left_alone():
