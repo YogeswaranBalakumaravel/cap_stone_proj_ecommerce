@@ -4,15 +4,17 @@ Every parser returns a list of findings with the same shape:
 
     {severity, blocking, file, line, title, detail, fix}
 
-`severity` is one of SEVERITIES. `blocking` is True when the finding fails its gate. All text comes
-from gate output, which on a fork PR is produced by the PR's own code, so `render()` escapes it and
-never lets it open HTML, links or @-mentions. Gitleaks findings never carry the matched secret.
+`severity` is one of SEVERITIES. `blocking` is True when the finding fails its gate. A parser raises
+ValueError when its input isn't the format it expects, so the gate shows as unreadable rather than
+as having no findings. All text comes from gate output, which on a fork PR is produced by the PR's
+own code, so `render()` escapes it and never lets it open HTML, links or @-mentions. Gitleaks
+findings never carry the matched secret, nor do bandit's hardcoded-password findings.
 """
 
 from __future__ import annotations
 
 import re
-import xml.etree.ElementTree as ET  # nosec B405 - parses JUnit XML pytest wrote, no entities
+import xml.etree.ElementTree as ET  # nosec B405 - a DOCTYPE is refused before parsing (parse_junit)
 
 MARKER = "<!-- gate-findings-commenter -->"
 SEVERITIES = ("blocker", "high", "medium", "low", "info")
@@ -20,6 +22,9 @@ ICONS = {"blocker": "🛑", "high": "🔴", "medium": "🟠", "low": "🟡", "in
 MAX_ROWS = 25  # findings shown per gate before the rest collapse into a count
 MAX_TEXT = 300  # characters kept from any one piece of gate text
 MAX_BODY = 60000  # GitHub rejects comments over 65536 characters
+# Bandit quotes the literal it found in these checks' issue_text, which may be a real password.
+BANDIT_SECRET_TESTS = {"B105", "B106", "B107"}
+ZWSP = "​"  # zero-width space: breaks autolinks without changing how the text reads
 
 # Workflow run conclusions, as the comment shows them.
 RESULTS = {
@@ -34,26 +39,44 @@ RESULTS = {
 }
 
 
+def repo_path(path) -> str | None:
+    """A repo-relative path: no file:// scheme, runner checkout prefix, ./ or backslashes."""
+    path = str(path or "").replace("\\", "/")
+    path = re.sub(r"^file://", "", path)
+    path = re.sub(r"^/home/runner/work/[^/]+/[^/]+/", "", path)
+    return path.removeprefix("./") or None
+
+
 def finding(severity, blocking, file, line, title, detail="", fix="") -> dict:
     sev = str(severity or "").lower()
     return {
         "severity": sev if sev in SEVERITIES else "medium",
         "blocking": bool(blocking),
-        "file": str(file or "").replace("\\", "/").removeprefix("./") or None,
-        "line": line if isinstance(line, int) and line > 0 else None,
+        "file": repo_path(file),
+        "line": line if isinstance(line, int) and not isinstance(line, bool) and line > 0 else None,
         "title": str(title or "").strip(),
         "detail": str(detail or "").strip(),
         "fix": str(fix or "").strip(),
     }
 
 
-def _rel(path: str, root: str = "") -> str:
-    """Strip the runner's checkout path so paths read as repo-relative."""
-    path = str(path or "").replace("\\", "/")
-    root = root.replace("\\", "/").rstrip("/")
-    if root and path.startswith(root + "/"):
-        path = path[len(root) + 1 :]
-    return re.sub(r"^/home/runner/work/[^/]+/[^/]+/", "", path)
+def _obj(value) -> dict:
+    return value if isinstance(value, dict) else {}
+
+
+def _items(value, what: str) -> list[dict]:
+    """The dict entries of a list; anything but a list means the file isn't what we expect."""
+    if value is None:
+        return []
+    if not isinstance(value, list):
+        raise ValueError(f"{what} isn't a list")
+    return [v for v in value if isinstance(v, dict)]
+
+
+def _top(data, what: str) -> dict:
+    if not isinstance(data, dict):
+        raise ValueError(f"{what} isn't a JSON object")
+    return data
 
 
 # ---- parsers, one per gate output ----
@@ -61,18 +84,20 @@ def _rel(path: str, root: str = "") -> str:
 
 def parse_ruff(data) -> list[dict]:
     """`ruff check --output-format json`: any finding fails the lint step."""
+    if not isinstance(data, list):
+        raise ValueError("ruff output isn't a JSON list")
     out = []
-    for r in data if isinstance(data, list) else []:
+    for r in _items(data, "ruff output"):
         code = r.get("code") or "syntax"
-        fix = (r.get("fix") or {}).get("message") or ""
+        fix = _obj(r.get("fix")).get("message") or ""
         if r.get("fix") and not fix:
             fix = "Run `ruff check --fix`."
         out.append(
             finding(
                 "high",
                 True,
-                _rel(r.get("filename", "")),
-                (r.get("location") or {}).get("row"),
+                r.get("filename"),
+                _obj(r.get("location")).get("row"),
                 f"{code}: {r.get('message', '')}",
                 fix=fix,
             )
@@ -84,22 +109,25 @@ def parse_bandit(data) -> list[dict]:
     """`bandit -f json`: the CI step fails on any reported issue."""
     sev = {"HIGH": "high", "MEDIUM": "medium", "LOW": "low"}
     out = []
-    for r in (data or {}).get("results", []) if isinstance(data, dict) else []:
+    for r in _items(_top(data, "bandit output").get("results"), "bandit results"):
+        test_id = str(r.get("test_id", ""))
+        text = r.get("issue_text", "")
+        if test_id in BANDIT_SECRET_TESTS:
+            text = "Possible hardcoded password (the value is left out of this comment)."
         extra = []
         if r.get("issue_confidence"):
             extra.append(f"confidence {str(r['issue_confidence']).lower()}")
-        cwe = (r.get("issue_cwe") or {}).get("id")
+        cwe = _obj(r.get("issue_cwe")).get("id")
         if cwe:
             extra.append(f"CWE-{cwe}")
-        detail = r.get("issue_text", "") + (f" ({', '.join(extra)})" if extra else "")
         out.append(
             finding(
                 sev.get(str(r.get("issue_severity", "")).upper(), "medium"),
                 True,
-                _rel(r.get("filename", "")),
+                r.get("filename"),
                 r.get("line_number"),
-                f"{r.get('test_id', '')} {r.get('test_name', '')}".strip(),
-                detail=detail,
+                f"{test_id} {r.get('test_name', '')}".strip(),
+                detail=str(text) + (f" ({', '.join(extra)})" if extra else ""),
                 fix="Fix the call, or add `# nosec` with a comment saying why it's safe.",
             )
         )
@@ -108,21 +136,22 @@ def parse_bandit(data) -> list[dict]:
 
 def parse_junit(text: str) -> list[dict]:
     """pytest `--junitxml`: one finding per failed or errored test."""
+    if re.search(r"<!(DOCTYPE|ENTITY)", text, re.IGNORECASE):
+        raise ValueError("JUnit XML with a DOCTYPE or entity isn't parsed")
     try:
-        root = ET.fromstring(text)  # nosec B314 - see the import
-    except ET.ParseError:
-        return []
+        root = ET.fromstring(text)  # nosec B314 - DOCTYPE refused above
+    except ET.ParseError as exc:
+        raise ValueError(f"JUnit XML doesn't parse: {exc}") from exc
     out = []
     for case in root.iter("testcase"):
         for kind in ("failure", "error"):
             node = case.find(kind)
             if node is None:
                 continue
-            classname = case.get("classname", "")
-            parts = classname.split(".")
+            parts = case.get("classname", "").split(".")
             # "tests.test_routes" -> tests/test_routes.py; a class name, if any, stays out.
-            mod = [p for p in parts if not p[:1].isupper()]
-            file = case.get("file") or ("/".join(mod) + ".py" if mod else None)
+            mod = [p for p in parts if p and not p[:1].isupper()]
+            file = repo_path(case.get("file") or ("/".join(mod) + ".py" if mod else None))
             # The traceback's last "path.py:N: Error" line in this file is where the test failed.
             line = None
             for m in re.finditer(r"(?m)^(\S+\.py):(\d+): ", node.text or ""):
@@ -149,16 +178,16 @@ def parse_junit(text: str) -> list[dict]:
 def parse_sarif(data) -> list[dict]:
     """Gitleaks SARIF. Only the rule and location are kept; the snippet holds the secret."""
     out = []
-    runs = data.get("runs", []) if isinstance(data, dict) else []
-    for run in runs:
-        for r in run.get("results", []) or []:
-            loc = ((r.get("locations") or [{}])[0].get("physicalLocation") or {})
+    for run in _items(_top(data, "SARIF").get("runs"), "SARIF runs"):
+        for r in _items(run.get("results"), "SARIF results"):
+            locations = _items(r.get("locations"), "SARIF locations")
+            loc = _obj((locations or [{}])[0].get("physicalLocation"))
             out.append(
                 finding(
                     "blocker",
                     True,
-                    (loc.get("artifactLocation") or {}).get("uri"),
-                    (loc.get("region") or {}).get("startLine"),
+                    _obj(loc.get("artifactLocation")).get("uri"),
+                    _obj(loc.get("region")).get("startLine"),
                     f"Possible secret ({r.get('ruleId', 'unknown rule')})",
                     fix="Remove it, rotate the credential, and purge it from the branch history. "
                     "If it's a false positive, add its fingerprint to `.gitleaksignore`.",
@@ -174,15 +203,16 @@ def parse_code_review(data, titles: dict | None = None) -> list[dict]:
     """
     titles = titles or {}
     out = []
-    for f in (data or {}).get("findings", []) if isinstance(data, dict) else []:
+    for f in _items(_top(data, "findings.json").get("findings"), "code review findings"):
         status = f.get("status") or "REPORT"
         if status == "ATTESTED":
             continue
-        check = titles.get(f.get("check"), str(f.get("check") or "").replace("_", " "))
+        check_id = str(f.get("check") or "")
+        check = titles.get(check_id, check_id.replace("_", " "))
         title = f.get("title", "")
         note = {
             "NEEDS_ATTESTATION": " A reviewer other than the author can approve with "
-            f"`attest: {f.get('check', '')}`.",
+            f"`attest: {check_id}`.",
             "MUST_REVIEW": " Needs a reviewer's look; doesn't block.",
         }.get(status, "")
         out.append(
@@ -192,7 +222,7 @@ def parse_code_review(data, titles: dict | None = None) -> list[dict]:
                 f.get("file"),
                 f.get("line"),
                 f"[{check}] {title}" if check else title,
-                detail=(f.get("explanation") or "") + note,
+                detail=str(f.get("explanation") or "") + note,
                 fix=f.get("suggestion"),
             )
         )
@@ -201,14 +231,13 @@ def parse_code_review(data, titles: dict | None = None) -> list[dict]:
 
 def parse_test_quality(data) -> list[dict]:
     """Test quality agent `metrics.json`. Blocks when its dimension fails and is a blocking one."""
-    if not isinstance(data, dict):
-        return []
-    dims = data.get("dimensions") or {}
+    data = _top(data, "metrics.json")
+    dims = _obj(data.get("dimensions"))
     blocking_mode = data.get("mode", "blocking") == "blocking"
     out = []
-    for f in data.get("findings") or []:
-        d = dims.get(f.get("dimension"), {})
-        dim = str(f.get("dimension", "")).replace("_", " ")
+    for f in _items(data.get("findings"), "test quality findings"):
+        d = _obj(dims.get(f.get("dimension")))
+        dim = str(f.get("dimension") or "").replace("_", " ")
         out.append(
             finding(
                 f.get("severity"),
@@ -233,6 +262,9 @@ def clean(text, limit: int = MAX_TEXT) -> str:
         text = text[: limit - 1].rstrip() + "…"
     text = text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
     text = text.replace("|", "\\|").replace("[", "\\[").replace("]", "\\]")
+    # Bare URLs autolink on GitHub; a zero-width space after the scheme or "www." stops that.
+    text = re.sub(r"(?i)(\w)(://)", rf"\1:{ZWSP}//", text)
+    text = re.sub(r"(?i)\bwww\.", f"www{ZWSP}.", text)
     # A zero-width joiner after @ stops GitHub turning @someone into a mention.
     return text.replace("@", "@‍")
 
@@ -243,11 +275,20 @@ def _code(text: str) -> str:
     return f"`{text}`" if text else ""
 
 
+def linkable(path: str | None) -> bool:
+    """Only plain repo-relative paths become links to the file."""
+    return bool(
+        path
+        and re.fullmatch(r"[\w.\-]+(/[\w.\-]+)*", path)
+        and not any(part in (".", "..") for part in path.split("/"))
+    )
+
+
 def _location(f: dict, blob_url: str) -> str:
     if not f["file"]:
         return "—"
     label = f["file"] + (f":{f['line']}" if f["line"] else "")
-    if not blob_url or not re.fullmatch(r"[\w./\-]+", f["file"]) or ".." in f["file"]:
+    if not blob_url or not linkable(f["file"]):
         return _code(label)
     anchor = f"#L{f['line']}" if f["line"] else ""
     return f"[{_code(label)}]({blob_url}/{f['file']}{anchor})"
@@ -284,11 +325,22 @@ def result_label(gate: dict) -> str:
     return RESULTS.get(gate.get("conclusion") or "", f"⚪ {gate.get('conclusion')}")
 
 
+def _counts(gate: dict) -> tuple[str, str]:
+    """Finding and blocking counts. Unknown is never shown as 0."""
+    if gate.get("status") is None:
+        return "—", "—"
+    found = gate.get("findings")
+    if found is None:
+        return "?", "?"
+    return str(len(found)), str(sum(1 for f in found if f["blocking"]))
+
+
 def render(gates: list[dict], sha: str, blob_url: str = "", updated: str = "") -> str:
     """One comment for every gate.
 
     Each gate is {name, status, conclusion, url, findings, note}. `status` is None when the gate's
-    workflow didn't run for this commit, and `findings` is None when its findings couldn't be read.
+    workflow didn't run for this commit. `findings` is None when they aren't known: the gate is
+    still running, kept no findings file, or its file couldn't be read.
     """
     total = sum(len(g["findings"] or []) for g in gates)
     blocking = sum(1 for g in gates for f in g["findings"] or [] if f["blocking"])
@@ -317,11 +369,8 @@ def render(gates: list[dict], sha: str, blob_url: str = "", updated: str = "") -
     ]
     for g in gates:
         name = f"[{g['name']}]({g['url']})" if g.get("url") else g["name"]
-        found = g["findings"]
-        out.append(
-            f"| {name} | {result_label(g)} | {'?' if found is None else len(found)} | "
-            f"{'?' if found is None else sum(1 for f in found if f['blocking'])} |"
-        )
+        found, blocks = _counts(g)
+        out.append(f"| {name} | {result_label(g)} | {found} | {blocks} |")
 
     for g in gates:
         found = sorted(g["findings"] or [], key=sort_key)
@@ -340,10 +389,12 @@ def render(gates: list[dict], sha: str, blob_url: str = "", updated: str = "") -
 
     out += [
         "",
-        "<sub>🚫 = fails the gate. Posted by the gate findings commenter (`.qa/commenter/`); "
-        "it edits this comment as gates finish. Each gate's own report has the full detail.</sub>",
+        "<sub>🚫 = fails the gate. ? = not known yet or couldn't be read. Posted by the gate "
+        "findings commenter (`.qa/commenter/`); it edits this comment as gates finish. Each "
+        "gate's own report has the full detail.</sub>",
     ]
     body = "\n".join(out)
     if len(body) > MAX_BODY:
+        # Cut at a line break so no table row is left half written.
         body = body[:MAX_BODY].rsplit("\n", 1)[0] + "\n\n…truncated. See each gate's run."
     return body

@@ -33,7 +33,8 @@ PR_EVENTS = ("pull_request", "pull_request_review")
 MAX_FILE = 5 * 1024 * 1024  # bytes read from any one artifact file
 
 # Gates in the order the comment lists them. `files` maps a file-name pattern inside the artifact to
-# the parser for it; `artifact` is a pattern for the artifact's name.
+# the parser for it; `artifact` is a pattern for the artifact's name. Without an artifact a gate's
+# findings show as unknown, unless `clean_pass_keeps_nothing` and the run passed.
 GATES = [
     {
         "name": "Lint and security scan (ruff, bandit)",
@@ -52,6 +53,8 @@ GATES = [
         "workflows": ["Gitleaks Secret Scan"],
         "artifact": "gitleaks*",
         "files": {"*.sarif": "sarif"},
+        # The action uploads its SARIF only when it finds a leak, so a clean pass keeps nothing.
+        "clean_pass_keeps_nothing": True,
     },
     {
         "name": "Test quality agent",
@@ -96,16 +99,24 @@ def parse(kind: str, raw: bytes, titles: dict) -> list[dict]:
 
 
 def read_artifact(zip_bytes: bytes, files: dict, titles: dict) -> list[dict]:
-    """Parse the wanted files out of an artifact zip without extracting it."""
-    out = []
+    """Parse the wanted files out of an artifact zip without extracting it.
+
+    Raises ValueError when the zip holds none of them, so the gate shows as unreadable, not clean.
+    """
+    out, matched = [], 0
     with zipfile.ZipFile(io.BytesIO(zip_bytes)) as z:
         for info in z.infolist():
-            if info.is_dir() or info.file_size > MAX_FILE:
-                continue
             base = info.filename.replace("\\", "/").rsplit("/", 1)[-1]
-            for pattern, kind in files.items():
-                if fnmatch.fnmatch(base, pattern):
-                    out += parse(kind, z.read(info), titles)
+            kinds = [k for p, k in files.items() if fnmatch.fnmatch(base, p)]
+            if info.is_dir() or not kinds:
+                continue
+            if info.file_size > MAX_FILE:
+                raise ValueError(f"{base} is over the {MAX_FILE // (1024 * 1024)} MB limit")
+            for kind in kinds:
+                out += parse(kind, z.read(info), titles)
+                matched += 1
+    if not matched:
+        raise ValueError("the artifact has no " + " or ".join(files))
     return out
 
 
@@ -207,13 +218,41 @@ class GitHub:
         return "created a comment"
 
 
+def gate_findings(gh: GitHub, spec: dict, mine: list[dict], titles: dict) -> tuple:
+    """(findings or None, note) for one gate whose latest run has completed.
+
+    A code review re-run on a review event keeps no artifact, so this falls back to the newest
+    completed run for the commit that kept an unexpired one.
+    """
+    latest = mine[0]
+    for run in (r for r in mine if r.get("status") == "completed"):
+        arts = [
+            a
+            for a in gh.run_artifacts(run["id"])
+            if fnmatch.fnmatch(a.get("name", ""), spec["artifact"]) and not a.get("expired")
+        ]
+        if not arts:
+            continue
+        found = []
+        for a in arts:
+            found += read_artifact(gh.download(a["archive_download_url"]), spec["files"], titles)
+        if run is latest:
+            return found, ""
+        return found, ("Findings are from an earlier run for this commit; the latest run "
+                       "didn't keep its own.")
+    if spec.get("clean_pass_keeps_nothing") and latest.get("conclusion") == "success":
+        return [], ""
+    return None, "No run for this commit kept a findings file. Open the run log for the result."
+
+
 def collect(gh: GitHub, sha: str, titles: dict) -> list[dict]:
     runs = gh.runs_for(sha)
     gates = []
     for spec in GATES:
         mine = latest_runs(runs, spec["workflows"])
+        # findings stays None (shown as ?) until it's known.
         gate = {"name": spec["name"], "status": None, "conclusion": None, "url": None,
-                "findings": [], "note": ""}
+                "findings": None, "note": ""}
         gates.append(gate)
         if not mine:
             continue
@@ -222,31 +261,10 @@ def collect(gh: GitHub, sha: str, titles: dict) -> list[dict]:
                     url=latest.get("html_url"))
         if latest.get("status") != "completed":
             continue
-        # A code review re-run on a review event has no artifact; fall back to the run before it.
-        for run in (r for r in mine if r.get("status") == "completed"):
-            arts = [
-                a
-                for a in gh.run_artifacts(run["id"])
-                if fnmatch.fnmatch(a.get("name", ""), spec["artifact"]) and not a.get("expired")
-            ]
-            if not arts:
-                continue
-            try:
-                found = []
-                for a in arts:
-                    found += read_artifact(gh.download(a["archive_download_url"]), spec["files"],
-                                           titles)
-                gate["findings"] = found
-            except (OSError, ValueError, zipfile.BadZipFile, urllib.error.URLError) as exc:
-                gate["findings"] = None
-                gate["note"] = f"Couldn't read this gate's findings: {exc}"
-            if run is not latest and gate["findings"]:
-                gate["note"] = ("Findings are from an earlier run for this commit; "
-                                "the latest run didn't keep its own.")
-            break
-        else:
-            if latest.get("conclusion") == "failure":
-                gate["note"] = "This run kept no findings file. Open the run log for the reason."
+        try:
+            gate["findings"], gate["note"] = gate_findings(gh, spec, mine, titles)
+        except Exception as exc:  # noqa: BLE001 - one gate's bad artifact mustn't hide the rest
+            gate["findings"], gate["note"] = None, f"Couldn't read this gate's findings: {exc}"
     return gates
 
 

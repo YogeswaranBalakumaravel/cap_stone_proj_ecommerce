@@ -1,24 +1,36 @@
 """The gate findings commenter (.qa/commenter) turns every gate's output into one PR comment.
 
-Covers each gate's parser against the output its tool really writes, what counts as blocking, the
-comment's escaping of PR-controlled text, keeping Gitleaks secrets out of the comment, reading
-artifacts, picking each gate's latest run, and editing only the commenter's own comment.
+Covers each gate's parser against the output its tool really writes, what counts as blocking,
+telling "no findings" apart from "not known", the comment's escaping of PR-controlled text, keeping
+secrets out of the comment, reading artifacts, picking each gate's latest run, and editing only the
+commenter's own comment.
 """
 
+import importlib.util
 import io
 import json
 import re
 import sys
+import urllib.error
 import zipfile
 from pathlib import Path
 
 import pytest
 
 HOME = Path(__file__).resolve().parents[1] / ".qa" / "commenter"
-sys.path.insert(0, str(HOME))
 
-import commenter as C  # noqa: E402
-import findings as F  # noqa: E402
+
+def load(name: str):
+    """Load a commenter module by path; commenter.py imports findings.py by its bare name."""
+    spec = importlib.util.spec_from_file_location(name, HOME / f"{name}.py")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+F = load("findings")
+C = load("commenter")
 
 RUNNER = "/home/runner/work/cap_stone_proj_ecommerce/cap_stone_proj_ecommerce"
 
@@ -178,9 +190,51 @@ def test_bandit_maps_severity_and_keeps_confidence_and_cwe():
     assert all(f["blocking"] for f in out)
 
 
-@pytest.mark.parametrize("data", [None, {}, {"results": []}, [], "not json"])
+@pytest.mark.parametrize("data", [{}, {"results": []}])
 def test_bandit_with_no_results_reports_nothing(data):
     assert F.parse_bandit(data) == []
+
+
+@pytest.mark.parametrize(
+    "parser, data",
+    [
+        (F.parse_bandit, None),
+        (F.parse_bandit, ["not", "an", "object"]),
+        (F.parse_bandit, {"results": "not a list"}),
+        (F.parse_ruff, {"not": "a list"}),
+        (F.parse_sarif, "text"),
+        (F.parse_code_review, []),
+        (F.parse_code_review, {"findings": {"a": 1}}),
+        (F.parse_test_quality, None),
+    ],
+)
+def test_output_in_an_unexpected_shape_is_unreadable_not_clean(parser, data):
+    with pytest.raises(ValueError):
+        parser(data)
+
+
+def test_entries_that_arent_objects_are_skipped_not_fatal():
+    out = F.parse_ruff(["junk", 3, None, RUFF[0]])
+    assert [f["title"] for f in out] == ["F401: `os` imported but unused"]
+    metrics = tq_metrics()
+    metrics["dimensions"] = ["not", "a", "dict"]  # every finding then counts as non-blocking
+    metrics["findings"].append("junk")
+    assert [f["blocking"] for f in F.parse_test_quality(metrics)] == [False, False]
+
+
+@pytest.mark.parametrize("test_id", ["B105", "B106", "B107"])
+def test_bandit_hardcoded_password_findings_never_carry_the_password(test_id):
+    password = "Sup3rS3cretValue!"
+    data = {"results": [{
+        "filename": "config.py", "line_number": 4, "issue_severity": "LOW",
+        "issue_confidence": "MEDIUM", "issue_cwe": {"id": 259}, "test_id": test_id,
+        "test_name": "hardcoded_password_string",
+        "issue_text": f"Possible hardcoded password: '{password}'",
+    }]}
+    out = F.parse_bandit(data)
+    assert out[0]["detail"].startswith("Possible hardcoded password (the value is left out")
+    body = F.render([gate("Lint", conclusion="failure", found=out)], "abc1234")
+    assert password not in json.dumps(out) and password not in body
 
 
 def test_junit_reports_failed_and_errored_tests_at_the_failing_line():
@@ -199,8 +253,34 @@ def test_junit_reports_failed_and_errored_tests_at_the_failing_line():
     assert all(f["blocking"] and f["severity"] == "blocker" for f in out)
 
 
-def test_junit_that_isnt_xml_reports_nothing_instead_of_crashing():
-    assert F.parse_junit("<testsuites><testcase") == []
+def test_truncated_junit_is_unreadable_not_clean():
+    with pytest.raises(ValueError, match="doesn't parse"):
+        F.parse_junit("<testsuites><testcase")
+
+
+def test_junit_with_a_doctype_is_refused_before_parsing():
+    bomb = '<?xml version="1.0"?><!DOCTYPE t [<!ENTITY a "aaaa">]><testsuites>&a;</testsuites>'
+    with pytest.raises(ValueError, match="DOCTYPE"):
+        F.parse_junit(bomb)
+
+
+@pytest.mark.parametrize(
+    "raw, expected",
+    [
+        (f"file://{RUNNER}/config.py", "config.py"),
+        ("file://config.py", "config.py"),
+        (f"{RUNNER}/tests/test_routes.py", "tests/test_routes.py"),
+        (".\\app\\routes.py", "app/routes.py"),
+    ],
+)
+def test_paths_from_every_gate_are_made_repo_relative(raw, expected):
+    sarif = json.loads(json.dumps(SARIF))
+    sarif["runs"][0]["results"][0]["locations"][0]["physicalLocation"]["artifactLocation"][
+        "uri"] = raw
+    assert F.parse_sarif(sarif)[0]["file"] == expected
+    xml = JUNIT.replace('classname="tests.test_routes" name="test_unknown_phone_404"',
+                        f'classname="tests.test_routes" name="test_unknown_phone_404" file="{raw}"')
+    assert F.parse_junit(xml)[0]["file"] == expected
 
 
 def test_gitleaks_finding_never_carries_the_secret():
@@ -265,7 +345,7 @@ def test_comment_headline_names_failed_gates_and_counts_blocking_findings():
     assert "❌ **1 gate(s) failed:** Lint. 5 finding(s), 4 blocking." in body
     assert "Commit `0123456` · updated 2026-10-15 10:00 UTC" in body
     assert "| [Lint](https://github.com/o/r/runs/1) | ❌ Failed | 2 | 2 |" in body
-    assert "| Secret scan | ➖ Not run | 0 | 0 |" in body
+    assert "| Secret scan | ➖ Not run | — | — |" in body  # nothing to count, not "0 found"
     link = "https://github.com/o/r/blob/0123456789abcdef/app/routes.py#L3"
     assert f"[`app/routes.py:3`]({link})" in body
     # A gate with nothing to say gets no section of its own.
@@ -273,9 +353,12 @@ def test_comment_headline_names_failed_gates_and_counts_blocking_findings():
 
 
 def test_comment_says_gates_are_running_until_they_finish():
-    body = F.render([gate("A"), gate("B", status="in_progress", conclusion=None)], "abc1234")
+    body = F.render(
+        [gate("A"), gate("B", status="in_progress", conclusion=None, found=None)], "abc1234"
+    )
     assert "⏳ **Gates still running.**" in body
-    assert "| B | ⏳ Running |" in body
+    assert "| A | ✅ Passed | 0 | 0 |" in body  # a finished gate with no findings: a real 0
+    assert "| B | ⏳ Running | ? | ? |" in body
 
 
 def test_comment_when_everything_passed_has_no_sections():
@@ -300,7 +383,7 @@ def test_pr_controlled_text_cannot_inject_html_links_mentions_or_break_the_table
     hostile = F.finding(
         "high", True, "app/x.py", 1,
         "<img src=x onerror=alert(1)> | [click](javascript:alert(1)) @admin",
-        detail="line one\n| --- |\nline two",
+        detail="line one\n| --- |\nline two https://evil.example/login www.evil.example",
         fix="<details><summary>",
     )
     body = F.render([gate("CI", conclusion="failure", found=[hostile])], "abc1234")
@@ -309,11 +392,17 @@ def test_pr_controlled_text_cannot_inject_html_links_mentions_or_break_the_table
     assert "&lt;img src=x onerror=alert(1)&gt;" in row
     assert "\\[click\\](javascript:" in row  # both brackets escaped, so no link forms
     assert not re.search(r"(?<!\\)\]\(javascript:", body)
+    # Bare URLs would autolink; a zero-width space keeps them as plain text.
+    assert "https://evil" not in body and "www.evil" not in body
+    assert f"https:{F.ZWSP}//evil.example/login" in row and f"www{F.ZWSP}.evil" in row
     assert "@admin" not in body and "@‍admin" in row
     assert row.count(" | ") == 4  # only the five columns' own separators; the text adds none
 
 
-@pytest.mark.parametrize("path", ["../../etc/passwd", "app/x.py) [y](https://evil.example"])
+@pytest.mark.parametrize(
+    "path",
+    ["../../etc/passwd", "/etc/passwd", "app/./x.py", "app/x.py) [y](https://evil.example"],
+)
 def test_odd_paths_are_shown_but_never_linked(path):
     body = F.render(
         [gate("CI", conclusion="failure", found=[F.finding("high", True, path, 1, "t")])],
@@ -339,6 +428,10 @@ def test_comment_stays_under_githubs_size_limit():
     body = F.render(gates, "abc1234")
     assert len(body) <= F.MAX_BODY + 100
     assert body.endswith("…truncated. See each gate's run.")
+    # The cut falls between lines: every table row that's left is whole.
+    kept = body.rsplit("\n\n…truncated", 1)[0].splitlines()
+    assert all(line.endswith("|") for line in kept if line.startswith("|"))
+    assert "| Gate 0 | ❌ Failed | 25 | 25 |" in body  # the summary table survives intact
 
 
 # ---- commenter: artifacts, runs, comments ----
@@ -359,10 +452,15 @@ def test_artifact_files_are_parsed_by_name_in_any_folder_and_others_ignored():
     ]
 
 
-def test_artifact_files_over_the_size_cap_are_skipped(monkeypatch):
+def test_artifact_file_over_the_size_cap_is_unreadable_not_clean(monkeypatch):
     monkeypatch.setattr(C, "MAX_FILE", 10)
-    out = C.read_artifact(zipped({"ruff.json": json.dumps(RUFF)}), {"ruff.json": "ruff"}, {})
-    assert out == []
+    with pytest.raises(ValueError, match="over the"):
+        C.read_artifact(zipped({"ruff.json": json.dumps(RUFF)}), {"ruff.json": "ruff"}, {})
+
+
+def test_artifact_without_the_expected_file_is_unreadable_not_clean():
+    with pytest.raises(ValueError, match="no metrics.json"):
+        C.read_artifact(zipped({"report.md": "x"}), {"metrics.json": "test_quality"}, {})
 
 
 def test_latest_runs_keeps_this_gates_pr_runs_newest_first():
@@ -381,12 +479,14 @@ class FakeGitHub(C.GitHub):
     def __init__(self, runs=(), artifacts=None, blobs=None, comments=()):
         super().__init__("o/r", "token")
         self.runs, self.artifacts, self.blobs = list(runs), artifacts or {}, blobs or {}
-        self.comments, self.sent = list(comments), []
+        self.comments, self.sent, self.paged = list(comments), [], []
 
     def runs_for(self, sha):
         return self.runs
 
     def run_artifacts(self, run_id):
+        if isinstance(self.artifacts.get(run_id), Exception):
+            raise self.artifacts[run_id]
         return self.artifacts.get(run_id, [])
 
     def download(self, url):
@@ -395,6 +495,7 @@ class FakeGitHub(C.GitHub):
         return self.blobs[url]
 
     def pages(self, path, key=None, limit=10):
+        self.paged.append(path)
         return self.comments
 
     def _request(self, method, path, body=None, opener=None):
@@ -438,16 +539,96 @@ def test_collect_marks_gates_that_didnt_run_running_or_couldnt_be_read():
     gates = {g["name"]: g for g in C.collect(gh, "sha", {})}
     assert gates["Secret scan (Gitleaks)"]["status"] is None
     assert gates["PR tests (pytest)"]["status"] == "in_progress"
-    assert gates["PR tests (pytest)"]["findings"] == []
+    assert gates["PR tests (pytest)"]["findings"] is None  # not known yet, not "none found"
     lint = gates["Lint and security scan (ruff, bandit)"]
     assert lint["findings"] is None and "connection reset" in lint["note"]
     assert gates["Test quality agent"]["findings"] is None
+    assert "Couldn't read" in gates["Test quality agent"]["note"]
 
 
-def test_collect_notes_a_failed_run_that_kept_no_findings():
-    gh = FakeGitHub(runs=[run(1, "CI", conclusion="failure")])
+@pytest.mark.parametrize("conclusion", ["failure", "success"])
+def test_a_run_that_kept_no_findings_file_shows_unknown_counts(conclusion):
+    gh = FakeGitHub(runs=[run(1, "CI", conclusion=conclusion)])
     lint = C.collect(gh, "sha", {})[0]
-    assert lint["findings"] == [] and "kept no findings file" in lint["note"]
+    assert lint["findings"] is None and "kept a findings file" in lint["note"]
+    body = F.render([lint], "abc1234")
+    assert f"| [{lint['name']}](https://x/runs/1) | " in body and " | ? | ? |" in body
+
+
+def test_gitleaks_passing_without_a_sarif_is_a_real_zero_but_failing_without_one_is_unknown():
+    clean = C.collect(FakeGitHub(runs=[run(1, "Gitleaks Secret Scan")]), "sha", {})[2]
+    assert clean["name"] == "Secret scan (Gitleaks)" and clean["findings"] == []
+    assert clean["note"] == ""
+    leak = FakeGitHub(runs=[run(1, "Gitleaks Secret Scan", conclusion="failure")])
+    assert C.collect(leak, "sha", {})[2]["findings"] is None
+
+
+def test_gitleaks_sarif_artifact_is_read_under_its_own_name():
+    gh = FakeGitHub(
+        runs=[run(1, "Gitleaks Secret Scan", conclusion="failure")],
+        artifacts={1: [{"name": "gitleaks-results.sarif", "archive_download_url": "g"}]},
+        blobs={"g": zipped({"results.sarif": json.dumps(SARIF)})},
+    )
+    leak = C.collect(gh, "sha", {})[2]
+    assert [f["title"] for f in leak["findings"]] == ["Possible secret (github-pat)"]
+
+
+def test_fallback_to_an_earlier_run_is_noted_even_when_it_found_nothing():
+    gh = FakeGitHub(
+        runs=[run(1, "Code review agent", at="T1"),
+              run(2, "Code review agent", event="pull_request_review", at="T2")],
+        artifacts={1: [{"name": "code-review-evidence", "archive_download_url": "u1"}]},
+        blobs={"u1": zipped({"findings.json": json.dumps({"findings": []})})},
+    )
+    cr = C.collect(gh, "sha", {})[4]
+    assert cr["findings"] == [] and "earlier run" in cr["note"]
+
+
+def test_expired_artifact_is_passed_over_for_an_earlier_run():
+    gh = FakeGitHub(
+        runs=[run(1, "Test quality agent", at="T1"), run(2, "Test quality agent", at="T2")],
+        artifacts={
+            2: [{"name": "test-quality-evidence", "archive_download_url": "old", "expired": True}],
+            1: [{"name": "test-quality-evidence", "archive_download_url": "u1"}],
+        },
+        blobs={"u1": zipped({"metrics.json": json.dumps(tq_metrics())})},
+    )
+    tq = C.collect(gh, "sha", {})[3]
+    assert len(tq["findings"]) == 2 and "earlier run" in tq["note"]
+
+
+def test_one_gate_failing_to_list_its_artifacts_doesnt_stop_the_others():
+    gh = FakeGitHub(
+        runs=[run(1, "CI - Dev", conclusion="failure"), run(2, "PR Test Gate")],
+        artifacts={
+            1: urllib.error.HTTPError("u", 503, "Service Unavailable", {}, None),
+            2: [{"name": "pytest-report", "archive_download_url": "p"}],
+        },
+        blobs={"p": zipped({"pytest-report.xml": JUNIT})},
+    )
+    lint, tests = C.collect(gh, "sha", {})[:2]
+    assert lint["findings"] is None and "503" in lint["note"]
+    assert len(tests["findings"]) == 2
+
+
+def test_pages_follows_every_page_so_a_comment_past_the_first_100_is_found(monkeypatch):
+    gh = C.GitHub("o/r", "t")
+    filler = [{"id": i, "user": {"login": "someone"}, "body": "hi"} for i in range(100)]
+    ours = {"id": 500, "user": {"login": C.BOT}, "body": F.MARKER + " old"}
+    served = {1: filler, 2: [ours]}
+    asked = []
+
+    def get(path):
+        asked.append(path)
+        return served[int(path.rsplit("page=", 1)[1])]
+
+    monkeypatch.setattr(gh, "get", get)
+    sent = []
+    monkeypatch.setattr(gh, "_request", lambda *a, **k: sent.append(a[:2]) or io.BytesIO(b"{}"))
+    assert gh.upsert_comment(5, F.MARKER + " new") == "updated comment 500"
+    assert asked == ["/repos/o/r/issues/5/comments?per_page=100&page=1",
+                     "/repos/o/r/issues/5/comments?per_page=100&page=2"]
+    assert sent == [("PATCH", "/repos/o/r/issues/comments/500")]  # edited, not duplicated
 
 
 def test_comment_is_edited_in_place_and_only_the_bots_own():
@@ -473,6 +654,8 @@ def test_find_pr_matches_a_fork_pr_by_its_head_commit():
     assert gh.find_pr({"pull_requests": [{"number": 4}], "head_sha": "abc"}) == 4
     assert gh.find_pr({"pull_requests": [], "head_sha": "abc"}) == 8
     assert gh.find_pr({"pull_requests": [], "head_sha": "zzz"}) is None
+    # Only open PRs are searched, so a closed PR with the same head gets no comment.
+    assert gh.paged and all("state=open" in path for path in gh.paged)
 
 
 def test_main_ignores_runs_that_werent_for_a_pull_request(monkeypatch, tmp_path, capsys):

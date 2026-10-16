@@ -30,6 +30,11 @@ to fix it. 🚫 marks findings that fail their gate:
 - Code review agent: status `BLOCK` or `NEEDS_ATTESTATION`.
 - Test quality agent: findings in a dimension that is `FAIL` and blocking, in blocking mode.
 
+Counts are never a guessed 0. A gate that is still running, kept no findings file, or wrote one
+that doesn't parse shows `?` with a note saying why. A gate whose workflow didn't run shows `—`.
+Gitleaks is the one exception: it uploads its SARIF only when it finds a leak, so a passing run with
+no artifact counts as 0.
+
 The commenter only reports. It never fails a PR; each gate enforces its own result. The agents'
 own comments are unchanged and still hold their full reports.
 
@@ -39,8 +44,12 @@ own comments are unchanged and still hold their full reports.
   changes here take effect only once they reach `main`.
 - Artifacts from fork PRs are produced by the PR's code, so they're data only. Zips are read in
   memory, only the named files are parsed (5 MB cap each), and nothing is extracted or executed.
-- All gate text is escaped before it reaches the comment: no raw HTML, links, table breaks or
-  @-mentions. File links are only made for plain repo paths.
+- All gate text is escaped before it reaches the comment: no raw HTML, links (bare URLs included),
+  table breaks or @-mentions. File links are only made for plain repo-relative paths.
+- Secrets stay out: Gitleaks findings keep only the rule and location, and bandit's
+  hardcoded-password checks (B105, B106, B107) get a fixed description instead of their text.
+- JUnit XML with a DOCTYPE or entity is refused before parsing (no entity-expansion attacks).
+- One gate's bad artifact or failed API call marks only that gate unreadable; the rest still post.
 - The token has `actions: read`, `contents: read` and `pull-requests: write`, nothing else.
 
 ## Trying it locally
