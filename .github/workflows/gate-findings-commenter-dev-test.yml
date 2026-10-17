@@ -1,0 +1,81 @@
+name: Gate findings commenter (dev test)
+
+# TEMPORARY: lives only on the dummy test PR and is never merged. The real commenter runs on
+# workflow_run, which GitHub only fires from the default branch, so it can't run on a dev PR until
+# it reaches main. This runs the same commenter code on the PR instead: once while the gates are
+# running, then again after they've all finished, editing the same comment.
+
+on:
+  pull_request:
+    branches: [dev]
+
+permissions: {}
+
+jobs:
+  comment:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    permissions:
+      actions: read
+      contents: read
+      pull-requests: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+      PR_NUMBER: ${{ github.event.pull_request.number }}
+      HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+    steps:
+      - name: Checkout the commenter
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+          sparse-checkout: |
+            .qa/commenter
+            .qa/code-review/config.json
+          sparse-checkout-cone-mode: false
+
+      - name: Build a workflow_run-shaped event
+        run: |
+          python3 - <<'EOF'
+          import json, os
+          event = {"workflow_run": {
+              "event": "pull_request",
+              "head_sha": os.environ["HEAD_SHA"],
+              "pull_requests": [{"number": int(os.environ["PR_NUMBER"])}],
+              "head_repository": {"full_name": os.environ["HEAD_REPO"]},
+          }}
+          with open("event.json", "w") as fh:
+              json.dump(event, fh)
+          EOF
+
+      - name: First pass, while the gates run
+        run: |
+          python3 - <<'EOF'
+          import os, runpy, sys
+          os.environ["GITHUB_EVENT_PATH"] = os.path.abspath("event.json")
+          sys.path.insert(0, ".qa/commenter")
+          sys.argv = ["commenter.py"]
+          runpy.run_path(".qa/commenter/commenter.py", run_name="__main__")
+          EOF
+
+      - name: Wait for every gate to finish
+        run: |
+          gates='["CI","CI - Dev","CI - UAT","PR Test Gate","Gitleaks Secret Scan","Test quality agent","Code review agent"]'
+          for i in $(seq 1 80); do
+            pending=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs?head_sha=$HEAD_SHA&per_page=100" \
+              --jq "[.workflow_runs[] | select(.name as \$n | $gates | index(\$n)) | select(.status != \"completed\")] | length")
+            echo "check $i: $pending gate run(s) still going"
+            [ "$pending" = "0" ] && [ "$i" -gt 2 ] && exit 0
+            sleep 30
+          done
+          echo "::warning::Gates were still running after 40 minutes; posting what's there."
+
+      - name: Final pass
+        run: |
+          python3 - <<'EOF'
+          import os, runpy, sys
+          os.environ["GITHUB_EVENT_PATH"] = os.path.abspath("event.json")
+          sys.path.insert(0, ".qa/commenter")
+          sys.argv = ["commenter.py"]
+          runpy.run_path(".qa/commenter/commenter.py", run_name="__main__")
+          EOF
