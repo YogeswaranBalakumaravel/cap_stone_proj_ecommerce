@@ -200,15 +200,24 @@ class GitHub:
         return None
 
     def upsert_comment(self, pr: int, body: str) -> str:
+        """Edit this commenter's comment on the PR, or create it.
+
+        Ours is a github-actions[bot] comment that *starts* with the marker. Other bots' comments
+        (the agents post as github-actions[bot] too) can quote the marker further down, e.g. when
+        the PR's acceptance criteria mention it, and must never be overwritten. If there are
+        several of ours, the oldest is kept up to date.
+        """
         comments = self.pages(f"/repos/{self.repo}/issues/{pr}/comments")
         mine = [
             c
             for c in comments
-            if F.MARKER in (c.get("body") or "") and (c.get("user") or {}).get("login") == BOT
+            if (c.get("body") or "").startswith(F.MARKER)
+            and (c.get("user") or {}).get("login") == BOT
         ]
         if mine:
-            cid = mine[-1]["id"]
-            if mine[-1].get("body") == body:
+            ours = min(mine, key=lambda c: (c.get("created_at") or "", c.get("id") or 0))
+            cid = ours["id"]
+            if ours.get("body") == body:
                 return f"comment {cid} already up to date"
             self._request(
                 "PATCH", f"/repos/{self.repo}/issues/comments/{cid}", {"body": body}
