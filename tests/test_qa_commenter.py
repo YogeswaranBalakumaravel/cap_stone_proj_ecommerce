@@ -895,6 +895,18 @@ def test_with_two_of_its_own_comments_the_oldest_is_kept_up_to_date():
              "body": F.MARKER + " a"}
     gh = FakeGitHub(comments=[newer, older])
     assert gh.upsert_comment(5, F.MARKER + " c") == "updated comment 4"
+    assert gh.sent == [("PATCH", "/repos/o/r/issues/comments/4", {"body": F.MARKER + " c"})]
+
+
+def test_when_its_own_comment_already_says_the_same_nothing_is_sent():
+    # With an agent report quoting the marker alongside, still no edit and no new comment.
+    ours = {"id": 4, "created_at": "2026-10-17T13:14:07Z", "user": {"login": C.BOT},
+            "body": F.MARKER + " same"}
+    agent = {"id": 6, "created_at": "2026-10-17T13:10:00Z", "user": {"login": C.BOT},
+             "body": "<!-- code-review-agent -->\n" + F.MARKER}
+    gh = FakeGitHub(comments=[agent, ours])
+    assert gh.upsert_comment(5, F.MARKER + " same") == "comment 4 already up to date"
+    assert gh.sent == []
 
 
 def test_an_agent_report_quoting_the_marker_alone_means_a_new_comment_is_created():
