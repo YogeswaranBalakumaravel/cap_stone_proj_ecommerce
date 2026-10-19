@@ -110,6 +110,14 @@ judgement calls wait for a reviewer (not the author) to approve with `attest: <c
 `CODE_REVIEW_MODE=advisory` makes it comment-only. Its job is `code-review`, not `review`, so it
 doesn't share a required-check name with the test quality agent.
 
+`.github/workflows/gate-findings-commenter.yml`: on `workflow_run` completion of any gate workflow
+above (CI, CI - Dev, CI - UAT, PR Test Gate, Gitleaks, both agents) for a PR, it keeps one PR comment
+(`<!-- gate-findings-commenter -->`) listing every gate's findings for the head commit, read from
+each run's artifacts. The CI workflows upload ruff/bandit JSON as `lint-security-report` for it.
+The code lives in `.qa/commenter/` (standard library only; see `.qa/commenter/README.md`). It only
+reports and never blocks. `workflow_run` runs it from the default branch, so changes to it take
+effect only once they reach `main`. If you rename a gate workflow, update its name there too.
+
 ## Notes / non-goals (v1)
 
 No auth/accounts/reviews, no live price-tracking/scraping, no purchase flow —

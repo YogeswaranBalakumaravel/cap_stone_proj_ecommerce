@@ -32,6 +32,25 @@ jobs:
       - name: Test (pytest)
         run: pytest --maxfail=1
 
+      # Saves ruff and bandit findings for the gate findings commenter. The steps above still
+      # decide pass or fail; this one re-runs both tools in report-only mode on PRs.
+      - name: Save lint and security findings
+        if: always() && github.event_name == 'pull_request'
+        run: |
+          mkdir -p .gate-out
+          ruff check . --output-format json --exit-zero > .gate-out/ruff.json || true
+          bandit -r app/ -x app/static -f json -o .gate-out/bandit.json --exit-zero || true
+
+      - name: Upload lint and security findings
+        if: always() && github.event_name == 'pull_request'
+        uses: actions/upload-artifact@v7
+        with:
+          name: lint-security-report
+          path: .gate-out/
+          include-hidden-files: true # .gate-out is a dot-folder
+          if-no-files-found: warn
+          retention-days: 7
+
   deploy:
     needs: build
     if: github.ref == 'refs/heads/dev' && github.event_name == 'push'
