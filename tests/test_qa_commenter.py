@@ -917,6 +917,33 @@ def test_an_agent_report_quoting_the_marker_alone_means_a_new_comment_is_created
     assert [m for m, *_ in gh.sent] == ["POST"]
 
 
+class StatefulGitHub(FakeGitHub):
+    """A fake whose POSTs really add a bot comment, so consecutive runs see each other's work."""
+
+    def _request(self, method, path, body=None, opener=None):
+        self.sent.append((method, path, body))
+        if method == "POST":
+            self.comments.append({"id": 100 + len(self.comments), "user": {"login": C.BOT},
+                                  "created_at": f"T{len(self.comments)}", "body": body["body"]})
+        elif method == "PATCH":
+            cid = int(path.rsplit("/", 1)[1])
+            next(c for c in self.comments if c["id"] == cid)["body"] = body["body"]
+        return io.BytesIO(b"{}")
+
+
+def test_consecutive_runs_keep_one_comment_next_to_an_agent_report_quoting_the_marker():
+    agent = {"id": 2, "created_at": "T0", "user": {"login": C.BOT},
+             "body": "<!-- code-review-agent -->\nAC-1 mentions " + F.MARKER}
+    gh = StatefulGitHub(comments=[agent])
+    assert gh.upsert_comment(5, F.MARKER + " running") == "created a comment"  # not the agent's
+    assert gh.upsert_comment(5, F.MARKER + " running") == "comment 101 already up to date"
+    assert gh.upsert_comment(5, F.MARKER + " done") == "updated comment 101"
+    assert [m for m, *_ in gh.sent] == ["POST", "PATCH"]
+    ours = [c for c in gh.comments if c["body"].startswith(F.MARKER)]
+    assert [c["id"] for c in ours] == [101] and ours[0]["body"] == F.MARKER + " done"
+    assert agent["body"] == "<!-- code-review-agent -->\nAC-1 mentions " + F.MARKER  # untouched
+
+
 def test_another_bot_comment_without_the_marker_is_left_alone():
     other = FakeGitHub(comments=[{"id": 3, "user": {"login": C.BOT}, "body": "Deploy preview"}])
     assert other.upsert_comment(5, F.MARKER) == "created a comment"
@@ -931,6 +958,50 @@ def test_find_pr_matches_a_fork_pr_by_its_head_commit():
     assert gh.find_pr({"pull_requests": [], "head_sha": "zzz"}) is None
     # Only open PRs are searched, so a closed PR with the same head gets no comment.
     assert gh.paged and all("state=open" in path for path in gh.paged)
+
+
+# ---- the workflows the commenter depends on ----
+
+WORKFLOWS = HOME.parents[1] / ".github" / "workflows"
+
+
+def step(workflow: str, name: str) -> str:
+    """The text of one named step in a workflow file."""
+    text = (WORKFLOWS / workflow).read_text(encoding="utf-8")
+    match = re.search(rf"(?ms)^      - name: {re.escape(name)}\n(.*?)(?=^      - name: |^  \S|\Z)",
+                      text)
+    assert match, f"{workflow} has no step named {name!r}"
+    return match.group(1)
+
+
+@pytest.mark.parametrize("workflow", ["ci.yml", "ci-dev.yml", "ci-uat.yml"])
+def test_ci_workflows_upload_the_ruff_and_bandit_files_the_commenter_reads(workflow):
+    lint = next(g for g in C.GATES if g["artifact"] == "lint-security-report")
+    save = step(workflow, "Save lint and security findings")
+    upload = step(workflow, "Upload lint and security findings")
+    for name in lint["files"]:  # ruff.json and bandit.json
+        assert f".gate-out/{name}" in save
+    assert "--exit-zero" in save  # report-only: the gate steps above decide pass or fail
+    assert f"name: {lint['artifact']}" in upload
+    assert "path: .gate-out/" in upload
+    # Seen on the dummy PR #29: without this, upload-artifact skips the dot-folder entirely.
+    assert re.search(r"include-hidden-files:\s*true", upload)
+    for s in (save, upload):
+        assert "if: always() && github.event_name == 'pull_request'" in s
+
+
+def test_every_gate_workflow_triggers_the_commenter_and_exists_under_that_name():
+    trigger = (WORKFLOWS / "gate-findings-commenter.yml").read_text(encoding="utf-8")
+    listed = re.search(r"(?ms)workflows:\n(.*?)\n    types:", trigger).group(1)
+    triggers = {line.strip()[2:] for line in listed.splitlines() if line.strip().startswith("- ")}
+    names = {
+        re.search(r"(?m)^name: (.+)$", p.read_text(encoding="utf-8")).group(1).strip()
+        for p in WORKFLOWS.glob("*.yml")
+    }
+    for gate in C.GATES:
+        for workflow in gate["workflows"]:
+            assert workflow in triggers, f"{workflow} doesn't trigger the commenter"
+            assert workflow in names, f"no workflow is named {workflow!r}"
 
 
 def test_main_ignores_runs_that_werent_for_a_pull_request(monkeypatch, tmp_path, capsys):
