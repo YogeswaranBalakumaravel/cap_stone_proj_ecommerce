@@ -47,7 +47,8 @@ jobs:
         with:
           name: lint-security-report
           path: .gate-out/
-          if-no-files-found: ignore
+          include-hidden-files: true # .gate-out is a dot-folder
+          if-no-files-found: warn
           retention-days: 7
 
   # Optional AI review gate: runs after lint/test are green, and only
