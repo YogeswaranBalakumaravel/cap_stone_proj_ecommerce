@@ -874,6 +874,37 @@ def test_a_spoofed_marker_in_someone_elses_comment_is_never_edited():
     assert gh.sent == [("POST", "/repos/o/r/issues/5/comments", {"body": F.MARKER + " real"})]
 
 
+@pytest.mark.parametrize("agent_posted", ["2026-10-17T13:15:25Z", "2026-10-17T13:10:00Z"])
+def test_an_agents_report_that_quotes_the_marker_is_never_overwritten(agent_posted):
+    # Seen on the dummy PR #29: the code review agent's report quoted an acceptance criterion
+    # mentioning the marker, and posting as the same bot, it was overwritten by the gate findings.
+    # Whether the agent posted before or after the commenter, only the commenter's own is edited.
+    ours = {"id": 1, "created_at": "2026-10-17T13:14:07Z", "user": {"login": C.BOT},
+            "body": F.MARKER + "\n## Gate findings (first pass)"}
+    agent = {"id": 2, "created_at": agent_posted, "user": {"login": C.BOT},
+             "body": "<!-- code-review-agent -->\n| **AC-1** One `" + F.MARKER + "` comment |"}
+    gh = FakeGitHub(comments=[ours, agent])
+    assert gh.upsert_comment(29, F.MARKER + "\nfinal") == "updated comment 1"
+    assert gh.sent == [("PATCH", "/repos/o/r/issues/comments/1", {"body": F.MARKER + "\nfinal"})]
+
+
+def test_with_two_of_its_own_comments_the_oldest_is_kept_up_to_date():
+    newer = {"id": 9, "created_at": "2026-10-17T13:15:25Z", "user": {"login": C.BOT},
+             "body": F.MARKER + " b"}
+    older = {"id": 4, "created_at": "2026-10-17T13:14:07Z", "user": {"login": C.BOT},
+             "body": F.MARKER + " a"}
+    gh = FakeGitHub(comments=[newer, older])
+    assert gh.upsert_comment(5, F.MARKER + " c") == "updated comment 4"
+
+
+def test_an_agent_report_quoting_the_marker_alone_means_a_new_comment_is_created():
+    agent = {"id": 2, "user": {"login": C.BOT},
+             "body": "<!-- code-review-agent -->\nmentions " + F.MARKER}
+    gh = FakeGitHub(comments=[agent])
+    assert gh.upsert_comment(5, F.MARKER + " new") == "created a comment"
+    assert [m for m, *_ in gh.sent] == ["POST"]
+
+
 def test_another_bot_comment_without_the_marker_is_left_alone():
     other = FakeGitHub(comments=[{"id": 3, "user": {"login": C.BOT}, "body": "Deploy preview"}])
     assert other.upsert_comment(5, F.MARKER) == "created a comment"
