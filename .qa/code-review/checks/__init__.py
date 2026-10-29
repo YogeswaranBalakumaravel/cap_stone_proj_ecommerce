@@ -14,6 +14,7 @@ from . import (
     injection,
     logic,
     requirements,
+    resilience,
     scope,
     tests_vs_requirements,
 )
@@ -29,4 +30,5 @@ ALL = [
     injection,
     assertions,
     tests_vs_requirements,
+    resilience,
 ]

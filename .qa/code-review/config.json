@@ -15,7 +15,8 @@
     "llm_antipatterns":          {"title": "LLM-typical anti-patterns",                        "row": "BLOCKING", "aliases": ["antipatterns", "anti-patterns"]},
     "injection_surfaces":        {"title": "Injection surfaces",                               "row": "BLOCKING", "aliases": ["injection"]},
     "assertions_never_fail":     {"title": "Assertions that can never fail",                   "row": "BLOCKING", "aliases": ["assertions"]},
-    "tests_assert_requirements": {"title": "Tests assert requirements, not the implementation", "row": "BLOCKING", "aliases": ["tests"], "human_attestation": true}
+    "tests_assert_requirements": {"title": "Tests assert requirements, not the implementation", "row": "BLOCKING", "aliases": ["tests"], "human_attestation": true},
+    "performance_resilience":    {"title": "Performance and resilience",                       "row": "STANDARD", "aliases": ["performance", "perf", "resilience"]}
   },
   "attestation": {
     "keyword": "attest:",

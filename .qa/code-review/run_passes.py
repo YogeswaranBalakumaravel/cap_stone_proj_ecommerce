@@ -3,7 +3,7 @@
 
     run_passes.py understand   cited map of the existing code, the ask, the implementation
     run_passes.py oracle       separate context: criteria + signatures only, no tools, no repo
-    run_passes.py review       the ten checks, with the understanding and the oracle as input
+    run_passes.py review       the eleven checks, with the understanding and the oracle as input
 
 Sign-in is shared with the test quality agent: the provider setup is imported from
 .qa/agent/run_agent.py (QA_PROVIDER = anthropic | bedrock | vertex | foundry | oauth | none).

@@ -47,6 +47,9 @@
     },
     "tests_assert_requirements": {
      "type": "string"
+    },
+    "performance_resilience": {
+     "type": "string"
     }
    }
   },
@@ -77,7 +80,8 @@
        "llm_antipatterns",
        "injection_surfaces",
        "assertions_never_fail",
-       "tests_assert_requirements"
+       "tests_assert_requirements",
+       "performance_resilience"
       ]
      },
      "severity": {
