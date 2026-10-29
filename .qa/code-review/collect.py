@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Stage 1: understand the PR mechanically, and run the ten checklist checks. Standard library only.
+"""Stage 1: understand the PR mechanically, and run the eleven checks. Standard library only.
 
 Never runs the PR's code: files are read as text and Python is parsed with `ast`, not imported.
 

@@ -1,11 +1,12 @@
 # Code review agent: reviews the frontend, backend and test code of every PR against the ten
-# Stream A checks of the "Checklist for AI-Assisted Applications" (Confluence, DA space).
+# Stream A checks of the "Checklist for AI-Assisted Applications" (Confluence, DA space), plus
+# an eleventh of this repo's own: performance and resilience.
 #
 #   1. collect.py              the ask (PR, criteria, Jira), a map of the existing code, the change,
-#                              and the ten deterministic checks
+#                              and the eleven deterministic checks
 #   2. run_passes.py understand  agent: cited map of the existing system, the ask, the implementation
 #      run_passes.py oracle      agent, separate context: criteria + signatures only, no tools
-#      run_passes.py review      agent: the ten checks, with the understanding and the oracle
+#      run_passes.py review      agent: the eleven checks, with the understanding and the oracle
 #   3. gate.py                 verifies every citation, applies attestations, decides, reports
 #
 # Nothing here runs the PR's code, which is why one job can hold the OIDC token. Sign-in is shared
@@ -119,7 +120,7 @@ jobs:
         if: steps.reuse.outputs.found != 'true' && env.QA_PROVIDER != '' && env.QA_PROVIDER != 'none'
         run: npm install -g "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}"
 
-      - name: 1. Understand the PR and run the ten checks
+      - name: 1. Understand the PR and run the eleven checks
         if: steps.reuse.outputs.found != 'true'
         env:
           PR_TITLE: ${{ github.event.pull_request.title || format('Full-project audit of {0}', github.ref_name) }}
@@ -145,7 +146,7 @@ jobs:
           CLAUDE_CODE_OAUTH_TOKEN: ${{ vars.QA_PROVIDER == 'oauth' && secrets.CLAUDE_CODE_OAUTH_TOKEN || '' }}
         run: python3 "$CR_HOME/run_passes.py" oracle
 
-      - name: 2c. Agent reviews the ten checks
+      - name: 2c. Agent reviews the eleven checks
         if: steps.reuse.outputs.found != 'true'
         continue-on-error: true
         env:

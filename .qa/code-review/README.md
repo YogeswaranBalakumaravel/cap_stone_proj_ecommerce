@@ -2,7 +2,8 @@
 
 A headless review of every pull request — backend, frontend and tests — against the ten Stream A
 checks of the organisation's
-[Checklist for AI-Assisted Applications](https://celestialsys.atlassian.net/wiki/spaces/DA/pages/3846176779).
+[Checklist for AI-Assisted Applications](https://celestialsys.atlassian.net/wiki/spaces/DA/pages/3846176779),
+plus an eleventh check of this repository's own: performance and resilience.
 It sits next to the test quality agent (`.qa/agent/`) and shares its sign-in.
 
 Ground rules, unchanged: Python standard library only, no API keys (keyless OIDC via `QA_PROVIDER`,
@@ -19,34 +20,35 @@ then of the change, and only then judges it.
                                        The existing code: routes and endpoints, templates and who renders them,
                                        url_for references, every symbol with its signature, element ids, imports.
                                        The change: files by area (backend / frontend / test), added lines.
-                                       The ten deterministic checks.
+                                       The eleven deterministic checks.
 2a. run_passes.py understand  agent    Cited map: how the relevant part works today, the conventions,
                                        the existing helpers the change should reuse, what each changed unit
                                        does and which criterion it serves, and the unchanged code it affects.
 2b. run_passes.py oracle      agent    Separate context, no tools, run outside the repository: from the
                                        criteria and the public signatures only, the behaviours a correct
                                        implementation must show (positive, negative, edge).
-2c. run_passes.py review      agent    The ten checks over the new code and the impacted existing code,
+2c. run_passes.py review      agent    The eleven checks over the new code and the impacted existing code,
                                        using 2a, 2b and the script findings.
 3. gate.py                    script   Verifies every citation, applies attestations, decides, reports.
 ```
 
 The PR's code is never executed: files are read as text and Python is parsed with `ast`.
 
-## The ten checks
+## The eleven checks
 
 | # | Check (row) | What the script proves | What the agent adds |
 |---|---|---|---|
 | 1 | **Dependency hygiene** (BLOCKING) | New dependencies are pinned (DP001), exist on PyPI / npm at that version (DP002), have no OSV advisories (DP003); typo-adjacent names (DP004), declared-but-never-imported (DP005), imported-but-undeclared or transitive-only (DP006) | Whether each dependency was needed at all; hallucinated *APIs* in real packages |
 | 2 | **Plausible-but-wrong logic** (BLOCKING, attestation) | Broken references the PR introduces or causes: `url_for` to a missing or renamed endpoint, missing templates (PL001–2); `x[len(x)]`, `is` with literals, self-comparison, `len() >= 0` (hard); naive datetimes, float `==`, `lower()` vs `casefold()`, identical branches, unknown element ids, loose `==` in JS (signals) | Hand traces of 2–3 inputs per non-trivial function; a `high` finding without a trace showing expected ≠ actual is downgraded |
 | 3 | **Requirement coverage** (BLOCKING) | `NotImplementedError`, stub bodies, "not implemented" throws (hard); TODO / placeholder markers, lorem ipsum; no criteria at all (RQ005) | Each criterion mapped to the code that implements it and the tests that check it; missing or partial ones need attestation |
-| 4 | **Error handling** (STANDARD) | Swallowed or log-and-ignore exceptions, exception text returned to clients, network calls without timeout, `return` in `finally`, `commit()` without `rollback()`, `fetch()` without error handling | One failure path traced end to end per changed I/O operation |
+| 4 | **Error handling** (STANDARD) | Swallowed or log-and-ignore exceptions, exception text returned to clients, `return` in `finally`, `commit()` without `rollback()`, `fetch()` without error handling | One failure path traced end to end per changed I/O operation |
 | 5 | **Scope creep** (ADVISORY, attestation) | New endpoints without the `new-endpoint` label, new env/config switches, files outside a declared `## Scope`, a diff-size budget, new code nothing calls, one-implementation abstractions | Every changed file reverse-walked against the criteria (`scope_map`) |
 | 6 | **Duplication and drift** (STANDARD) | Functions structurally identical to existing ones (renamed variables don't hide it), copied blocks in any language, layer contracts (`architecture.contracts`), same-name reimplementations | Comparison with the conventions in `CLAUDE.md` / `AGENTS.md` and the existing helpers from pass 2a |
 | 7 | **LLM-typical anti-patterns** (BLOCKING) | String-built SQL / shell, hard-coded secrets and credential-shaped literals (redacted in every output), `verify=False` and friends, MD5/SHA-1 and `random` for secrets, debug on, unsafe deserialisation, world-writable files, CORS `*` with credentials, disabled cookie/CSRF protections; frontend: autoescape off, `eval`, `javascript:` URLs, tokens in `localStorage`, missing SRI and CSRF | Missing input validation, verbose errors, over-broad permissions |
 | 8 | **Injection surfaces** (BLOCKING) | Every interpreter sink the PR adds (SQL, shell, eval, templates, regex, deserialisation, paths, redirects, outbound URLs, XML, DOM, `\|safe`), plus intra-function taint from route parameters and `request.*`: tainted sinks are hard failures (INJ001), untraceable dynamic sinks need a verdict (INJ002) | A `tainted` / `safe` / `unclear` verdict for each INJ002, citing the source line (the gate checks it reads untrusted input); sinks across functions |
 | 9 | **Assertions that can never fail** (BLOCKING) | Constant and tautological asserts, assertion-free and empty tests, tests that only assert on their own mocks, try/except that swallows the failure (hard); `is not None` as the only check, unconditional skips | Assertions too weak to catch a realistic wrong result |
 | 10 | **Tests assert requirements, not the implementation** (BLOCKING, attestation) | Expected values computed by the code under test, tests that re-implement the algorithm, private imports, patching the unit's own internals, changed behaviour no test touches | The separate-context oracle compared with the PR's tests: each behaviour `asserted`, `asserted_differently` (a test written from the code) or `missing` |
+| 11 | **Performance and resilience** (STANDARD; not a checklist row) | A database query inside a loop (PF001), a GET list endpoint (or a helper it calls) returning `.all()` with no `limit`/`paginate` (PF002), a login, token, password or cart/checkout write route without a rate-limit decorator and no app-wide `default_limits` (PF003), network calls without `timeout=` (PF004, formerly EH002), payment or shipping calls in a module with no retry, backoff or circuit breaker (PF005) | Queries per request including lazy loads in templates, limits set elsewhere (gateway, app-wide), idempotency of retried charges |
 
 The mutation spot-check that the checklist names for row 9 is the test quality agent's job
 (`.qa/agent`, probes and systematic mutants). Run both.
@@ -76,7 +78,8 @@ attest: logic, tests
 ```
 
 Aliases: `deps`, `logic`, `requirements`, `errors`, `scope`, `duplication`, `antipatterns`,
-`injection`, `assertions`, `tests`, or `all`. The review event re-runs only the gate on the stored
+`injection`, `assertions`, `tests`, `performance`, or `all`.
+The review event re-runs only the gate on the stored
 evidence (no agent cost). A later "changes requested" from the same reviewer withdraws it; a new
 push needs a new attestation (`attestation.require_same_commit`). The report names who attested
 what, which is the evidence record the checklist asks for.

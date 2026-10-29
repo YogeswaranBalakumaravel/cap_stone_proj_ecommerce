@@ -102,8 +102,9 @@ mutants cover mutation testing.
 
 `.github/workflows/code-review-agent.yml`: on PRs to `main`, `dev` and `staging`, a code
 review agent checks the PR's backend, frontend and test code against the ten Stream A checks
-of the *Checklist for AI-Assisted Applications*. The code lives in `.qa/code-review/` (standard
-library only; see `.qa/code-review/README.md`). It reuses the test quality agent's sign-in
+of the *Checklist for AI-Assisted Applications*, plus an eleventh of its own (performance and
+resilience: query counts, pagination, rate limits, timeouts, retries; STANDARD, so it doesn't
+block). The code lives in `.qa/code-review/` (standard library only; see `.qa/code-review/README.md`). It reuses the test quality agent's sign-in
 from `.qa/agent/` and the same `QA_PROVIDER` (including `oauth`); with that unset, its deterministic checks still
 run and can still block. It loads from the PR's base branch too. Only lines the PR adds can block;
 judgement calls wait for a reviewer (not the author) to approve with `attest: <check>`.

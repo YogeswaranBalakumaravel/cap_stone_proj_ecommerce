@@ -1,7 +1,7 @@
-"""Error handling (STANDARD): no swallowed exceptions, failures propagate, I/O has timeouts.
+"""Error handling (STANDARD): no swallowed exceptions, failures propagate.
 
-Mirrors the Ruff BLE / TRY / S110 / S112 intent plus the timeout rule Ruff lacks, without
-needing those rule sets enabled.
+Mirrors the Ruff BLE / TRY / S110 / S112 intent without needing those rule sets enabled. Network
+timeouts (formerly EH002) are PF004 in resilience.py.
 """
 
 from __future__ import annotations
@@ -14,27 +14,6 @@ from cr_common import Ctx, finding, line_of
 from . import _ast
 
 CHECK = "error_handling"
-NET_CALLS = (
-    "requests.get",
-    "requests.post",
-    "requests.put",
-    "requests.patch",
-    "requests.delete",
-    "requests.head",
-    "requests.request",
-    "httpx.get",
-    "httpx.post",
-    "httpx.put",
-    "httpx.delete",
-    "httpx.request",
-    "urlopen",
-    "urllib.request.urlopen",
-    "smtplib.SMTP",
-    "smtplib.SMTP_SSL",
-    "socket.create_connection",
-    "http.client.HTTPConnection",
-    "http.client.HTTPSConnection",
-)
 LOG_CALLS = re.compile(r"(^|\.)(debug|info|warning|warn|error|exception|critical|print|log)$")
 
 
@@ -118,22 +97,6 @@ def run(ctx: Ctx, idx: dict) -> list[dict]:
                         explanation="Leaks internals (paths, SQL, stack details) to the client.",
                         suggestion="Log the exception; return a generic message and a proper "
                         "status code.",
-                    )
-            elif isinstance(node, ast.Call):
-                name = _ast.call_name(node)
-                if (
-                    any(name == c or name.endswith("." + c) for c in NET_CALLS)
-                    and _ast.kw(node, "timeout") is None
-                ):
-                    hit(
-                        "EH002",
-                        node.lineno,
-                        severity="medium",
-                        hard=False,
-                        title=f"{name}() without a timeout",
-                        explanation="A slow upstream hangs this worker indefinitely.",
-                        suggestion="Pass timeout= (and retry with backoff where the call is "
-                        "idempotent).",
                     )
             elif isinstance(node, ast.Try) and node.finalbody:
                 for s in node.finalbody:
