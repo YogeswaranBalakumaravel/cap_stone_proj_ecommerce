@@ -9,7 +9,10 @@ commenter's own comment.
 import importlib.util
 import io
 import json
+import os
 import re
+import shutil
+import subprocess
 import sys
 import urllib.error
 import zipfile
@@ -990,6 +993,96 @@ def test_ci_workflows_upload_the_ruff_and_bandit_files_the_commenter_reads(workf
         assert "if: always() && github.event_name == 'pull_request'" in s
 
 
+def build_steps(workflow: str) -> list[tuple[str, str]]:
+    """(name, body) of each step of the workflow's `build` job, in order."""
+    text = (WORKFLOWS / workflow).read_text(encoding="utf-8")
+    job = re.search(r"(?ms)^  build:\n(.*?)(?=^  \S|\Z)", text).group(1)
+    return re.findall(r"(?ms)^      - name: ([^\n]+)\n(.*?)(?=^      - name: |\Z)", job)
+
+
+def run_script(body: str) -> str:
+    """The shell script in a step's `run:`, one line or a `|` block."""
+    block = re.search(r"(?ms)^        run: \|\n(.*?)(?=^        \S|\Z)", body)
+    if block:
+        return "\n".join(line[10:] for line in block.group(1).splitlines())
+    return re.search(r"(?m)^        run: (.+)$", body).group(1)
+
+
+GATE_STEPS = {
+    "Lint (ruff)": "ruff check .",
+    "Security scan (bandit)": "bandit -r app/ -x app/static",
+    "Test (pytest)": "pytest --maxfail=1",
+}
+
+
+@pytest.mark.parametrize("workflow", ["ci.yml", "ci-dev.yml", "ci-uat.yml"])
+def test_findings_steps_come_after_the_gate_steps_and_leave_them_alone(workflow):
+    steps = build_steps(workflow)
+    names = [name for name, _ in steps]
+    # The gate steps still decide the result: unchanged commands, always run, never excused.
+    for name, command in GATE_STEPS.items():
+        body = dict(steps)[name]
+        assert run_script(body) == command
+        assert "continue-on-error" not in body and "if:" not in body
+    last_gate = max(names.index(n) for n in GATE_STEPS)
+    assert names[last_gate + 1:] == [
+        "Save lint and security findings",
+        "Upload lint and security findings",
+    ]
+    upload = dict(steps)["Upload lint and security findings"]
+    assert re.search(r"(?m)^          if-no-files-found: (warn|ignore)\b", upload)  # never fails
+
+
+def _bash():
+    """A real bash: on Windows, Git's (system32's bash.exe is WSL)."""
+    if sys.platform != "win32":
+        return shutil.which("bash")
+    git = shutil.which("git")
+    candidate = Path(git).resolve().parents[1] / "bin" / "bash.exe" if git else None
+    return str(candidate) if candidate and candidate.is_file() else None
+
+
+@pytest.mark.parametrize("workflow", ["ci.yml", "ci-dev.yml", "ci-uat.yml"])
+def test_save_step_writes_the_files_the_commenter_reads_without_failing_the_job(
+    workflow, tmp_path
+):
+    bash = _bash()
+    if not bash:
+        pytest.skip("needs bash to run the workflow's step")
+    app = tmp_path / "app"
+    app.mkdir()
+    (app / "bad.py").write_text(
+        "import os\nimport subprocess\n\nsubprocess.call('ls', shell=True)\n", encoding="utf-8"
+    )
+    tools = os.pathsep.join([str(Path(sys.executable).parent), os.environ.get("PATH", "")])
+    env = {**os.environ, "PATH": tools}
+
+    def sh(script):
+        # How GitHub runs a `run:` step: bash -e -o pipefail.
+        return subprocess.run([bash, "--noprofile", "--norc", "-eo", "pipefail", "-c", script],
+                              cwd=tmp_path, env=env, capture_output=True, text=True, timeout=120)
+
+    steps = dict(build_steps(workflow))
+    # The tree really fails both gates...
+    assert sh(GATE_STEPS["Lint (ruff)"]).returncode != 0
+    assert sh(GATE_STEPS["Security scan (bandit)"]).returncode != 0
+    # ...yet the report-only step succeeds, and leaves the findings the commenter parses.
+    saved = sh(run_script(steps["Save lint and security findings"]))
+    assert saved.returncode == 0, saved.stderr
+    out = tmp_path / ".gate-out"
+    ruff = F.parse_ruff(json.loads((out / "ruff.json").read_text(encoding="utf-8")))
+    bandit = F.parse_bandit(json.loads((out / "bandit.json").read_text(encoding="utf-8")))
+    assert [(f["file"].endswith("app/bad.py"), f["line"], f["title"][:5]) for f in ruff] == [
+        (True, 1, "F401:")
+    ]
+    assert ("B602", 4) in {(f["title"].split()[0], f["line"]) for f in bandit}
+    assert all(f["blocking"] for f in ruff + bandit)
+
+    # With the tools missing it still can't fail the job: the gate steps report that instead.
+    env["PATH"] = str(Path(bash).parent)
+    assert sh(run_script(steps["Save lint and security findings"])).returncode == 0
+
+
 def test_every_gate_workflow_triggers_the_commenter_and_exists_under_that_name():
     trigger = (WORKFLOWS / "gate-findings-commenter.yml").read_text(encoding="utf-8")
     listed = re.search(r"(?ms)workflows:\n(.*?)\n    types:", trigger).group(1)
@@ -1019,6 +1112,33 @@ def test_main_without_credentials_fails_loudly(monkeypatch):
     for name in ("GITHUB_REPOSITORY", "GH_TOKEN", "GITHUB_TOKEN", "GITHUB_EVENT_PATH"):
         monkeypatch.delenv(name, raising=False)
     assert C.main() == 1
+
+
+def test_main_posts_one_comment_through_upsert(monkeypatch, tmp_path, capsys):
+    event = tmp_path / "event.json"
+    event.write_text(json.dumps({"workflow_run": {
+        "event": "pull_request", "head_sha": "abc1234def", "pull_requests": [{"number": 5}],
+        "head_repository": {"full_name": "o/r"}}}))
+    gh = FakeGitHub(runs=[run(1, "CI - UAT", conclusion="failure")],
+                    artifacts={1: [{"name": "lint-security-report", "archive_download_url": "u"}]},
+                    blobs={"u": zipped({"ruff.json": json.dumps(RUFF)})})
+    upserts = []
+    real = gh.upsert_comment
+    monkeypatch.setattr(gh, "upsert_comment",
+                        lambda pr, body: upserts.append((pr, body)) or real(pr, body))
+    for name, value in {"GITHUB_REPOSITORY": "o/r", "GH_TOKEN": "t",
+                        "GITHUB_EVENT_PATH": str(event)}.items():
+        monkeypatch.setenv(name, value)
+    monkeypatch.delenv("COMMENTER_DRY_RUN", raising=False)
+    monkeypatch.delenv("GITHUB_STEP_SUMMARY", raising=False)
+    monkeypatch.setattr(C, "GitHub", lambda *a: gh)
+    assert C.main() == 0
+    assert len(upserts) == 1
+    pr, body = upserts[0]
+    assert pr == 5 and body.startswith(F.MARKER) and "F401" in body
+    assert [(m, p) for m, p, _ in gh.sent] == [("POST", "/repos/o/r/issues/5/comments")]
+    assert gh.sent[0][2]["body"] == body
+    assert "PR #5: created a comment." in capsys.readouterr().out
 
 
 def test_main_dry_run_prints_the_comment_and_writes_the_job_summary(monkeypatch, tmp_path, capsys):
