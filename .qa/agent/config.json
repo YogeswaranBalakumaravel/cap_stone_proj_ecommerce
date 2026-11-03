@@ -25,7 +25,8 @@
     ]
   },
   "tests": {
-    "command": "python -m pytest -q -x -p no:cacheprovider",
+    "install_command": "",
+    "command":"python -m pytest -q -x -p no:cacheprovider",
     "targeted_command": "python -m pytest -q -x -p no:cacheprovider {tests}",
     "timeout_seconds": 600,
     "inconclusive_exit_codes": [

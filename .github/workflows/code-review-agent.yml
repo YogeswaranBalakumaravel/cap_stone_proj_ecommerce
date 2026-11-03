@@ -25,6 +25,11 @@ on:
   pull_request_review:
     types: [submitted, dismissed]
   workflow_dispatch:     # Run workflow: report-only audit of the whole project on a branch
+    inputs:
+      jira:              # no PR to read requirements from, so the run asks for the tickets
+        description: Jira links or keys whose requirements the audit checks (comma or space separated)
+        required: true
+        type: string
 
 permissions: {}
 
@@ -126,6 +131,7 @@ jobs:
           PR_BODY: ${{ github.event.pull_request.body }}
           PR_LABELS: ${{ toJSON(github.event.pull_request.labels.*.name) }}
           HEAD_REF: ${{ github.event.pull_request.head.ref || github.ref_name }}
+          QA_JIRA_LINKS: ${{ inputs.jira }}
           JIRA_BASE_URL: ${{ vars.JIRA_BASE_URL }}
           JIRA_EMAIL: ${{ vars.JIRA_EMAIL }}
           JIRA_API_TOKEN: ${{ secrets.JIRA_API_TOKEN }}

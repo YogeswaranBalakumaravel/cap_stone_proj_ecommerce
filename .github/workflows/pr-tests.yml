@@ -21,10 +21,13 @@ jobs:
         uses: actions/setup-python@v7
         with:
           python-version: "3.12"
-          cache: "pip"
 
       - name: Install dependencies
-        run: pip install -r requirements.txt
+        # From whatever the repo declares (requirements*.txt, pyproject.toml, setup.py,
+        # package.json) or the QA_INSTALL_COMMAND variable, plus pytest if that's missing.
+        env:
+          QA_INSTALL_COMMAND: ${{ vars.QA_INSTALL_COMMAND }}
+        run: python3 .qa/agent/install_deps.py
 
       - name: Run unit tests
         run: pytest --maxfail=1 --junitxml=pytest-report.xml

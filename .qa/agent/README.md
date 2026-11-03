@@ -68,13 +68,13 @@ The thresholds are starting points. Tune them in `config.json` once you've calib
 1. **Copy the files** into your repository: `.qa/agent/` and `.github/workflows/test-quality-agent.yml` (plus `.github/pull_request_template.md` if you want the acceptance-criteria section). Merge them to `main` first: the workflow loads the agent from the base branch, so a PR can't weaken its own review.
 2. **Choose how the agent signs in** (see [Signing in without keys](#signing-in-without-keys)): set the repository variable `QA_PROVIDER` to `anthropic`, `bedrock`, `vertex` or `foundry`, plus that provider's variables, or to `oauth` with the secret `CLAUDE_CODE_OAUTH_TOKEN`. Leave it unset, or set it to `none`, to run the scripts only.
 3. **Set your test command and paths** in `config.json`: `tests.command`, `tests.targeted_command`, and the `paths` globs. The defaults suit a Python repository that uses pytest.
-4. **Edit the dependency step** in the workflow so that your tests can run.
+4. **Dependencies install themselves.** `install_deps.py` reads what the repo declares: every `requirements*.txt` at the root, a `pyproject.toml` with a `[project]` table (or `setup.py`), with its `test`/`tests`/`dev` extra, and `package.json` (`npm ci`). It adds pytest if the test command needs it. No `requirements.txt` is needed. If your project installs some other way, set the repository variable `QA_INSTALL_COMMAND` (or `tests.install_command`), for example `poetry install` or `uv sync --frozen`.
 5. **Protect the gate.** Add a CODEOWNERS rule so that changes to the agent need QA approval:
    ```
    /.qa/                @your-org/qa-team
    /.github/workflows/  @your-org/qa-team
    ```
-6. **Write acceptance criteria in the PR description** under an "Acceptance criteria" heading (the PR template adds one). Alternatively, set `JIRA_BASE_URL` and `JIRA_EMAIL` as repository variables and `JIRA_API_TOKEN` as a secret; the agent then reads the ticket whose key appears in the branch name or PR title.
+6. **Give the requirements in the PR.** Write acceptance criteria in the PR description under an "Acceptance criteria" heading (the PR template adds one). The agent also reads every Jira ticket the PR names: links anywhere in the description, keys in its "Ticket" section, and keys in the PR title or branch name (up to 10). For that, set `JIRA_BASE_URL` and `JIRA_EMAIL` as repository variables and `JIRA_API_TOKEN` as a secret. The token only goes to `JIRA_BASE_URL`: a link to any other host is ignored. A [full-project audit](#full-project-audit) has no PR, so it asks for the Jira links instead.
 7. **Blocking is the default.** A PR fails the check when a blocking check fails. Make **Test quality agent / review** a required status check on `main`, `dev` and `staging` so it can't be merged around. Set the repository variable `QA_MODE=advisory` to only comment.
 
 ## Signing in without keys
@@ -153,7 +153,8 @@ The agent steps are skipped. The gate still runs coverage, the change-reverted c
 | `probes.systematic`, `systematic_max` | Systematic mutants on or off, and how many per PR (default 15, one per changed line first). Lines with `pragma: no mutate` are skipped. |
 | `probes.line_tolerance` | How far the script searches when the agent's line number is slightly off. |
 | `probes.min_valid_for_score` | The minimum number of valid probes before a mutation score is reported. |
-| `requirements.*` | Where acceptance criteria come from: the PR description heading, `files` (for example `docs/acceptance/*.md`), or Jira. Set `require: true` to fail check 2 when no criteria are given. |
+| `requirements.*` | Where acceptance criteria come from: the PR description heading, `files` (for example `docs/acceptance/*.md`), or Jira (`jira_key_regex`, `jira_ac_field`). Set `require: true` to fail check 2 when no criteria are given. |
+| `tests.install_command` | Optional. One command that installs what the tests need, such as `poetry install` or `uv sync`. The repository variable `QA_INSTALL_COMMAND` overrides it. Left empty, `install_deps.py` works it out from the repo's dependency files. |
 | `agent.provider` | How the agent signs in: `anthropic`, `bedrock`, `vertex`, `foundry`, `oauth` or `none` (default). The repository variable `QA_PROVIDER` overrides it. |
 | `agent.model`, `max_turns`, `max_budget_usd`, `timeout_seconds` | The model (or the `QA_MODEL` variable), and cost, turn and time limits for each pass. |
 | `thresholds.*` | The pass marks for each metric. |
@@ -202,7 +203,9 @@ The PR comment shows the six checks against their thresholds, a **Gate reasons**
 
 To run the whole project through the gate, not just one PR's changes, open **Actions → Test quality agent → Run workflow** and pick a branch (`main`, `dev` or `staging`). The run treats every tracked file as new, runs changed-line coverage over all of it, tries up to 60 systematic mutants, and scans every test. The report goes to the run's summary page instead of a PR comment. The "change reverted" check doesn't apply, because there's no earlier version to revert to.
 
-Locally, set `QA_FULL_AUDIT=1` (and optionally `QA_SYSTEMATIC_MAX=60`) and run the five scripts as below.
+There's no PR to read requirements from, so **Run workflow asks for Jira links** (the required `jira` input): links such as `https://your-org.atlassian.net/browse/SHOP-12`, or bare keys, separated by commas or spaces. The run reads each ticket's summary, description and acceptance-criteria field. It stops with an error, before anything else runs, when no links are given, when `JIRA_BASE_URL` or the `JIRA_API_TOKEN` secret isn't set, or when none of the tickets can be read. The code review agent's audit asks for the same input.
+
+Locally, set `QA_FULL_AUDIT=1` (and optionally `QA_SYSTEMATIC_MAX=60`) and `QA_JIRA_LINKS`, and run the five scripts as below. Without `QA_JIRA_LINKS`, `collect_context.py` asks for the links in the terminal.
 
 To run the agent on a past PR, run this from the repository root:
 
@@ -234,7 +237,9 @@ Outside GitHub Actions no OIDC token is fetched. Each provider uses its normal l
 
 | File | Stage | Purpose |
 |---|---|---|
-| `collect_context.py` | 1 | Gathers the PR text, acceptance criteria (PR description, requirement files, optional Jira), changed files and line ranges, and the diff. Runs the static scan. |
+| `collect_context.py` | 1 | Gathers the PR text, acceptance criteria (PR description, the Jira tickets it names, requirement files), changed files and line ranges, and the diff. Runs the static scan. |
+| `jira_refs.py` | 1 | Which Jira tickets a run reads: the ones a PR links or names, or for an audit the `jira` input. Shared with the code review agent. |
+| `install_deps.py` | 3 | Installs what the tests need from what the repo declares (`requirements*.txt`, `pyproject.toml`, `setup.py`, `package.json`) or `QA_INSTALL_COMMAND`. Also used by the CI workflows. |
 | `scan_tests.py` | 1 | Static assertion scan of the PR's Python tests. |
 | `run_agent.py` | 2, 4 | Signs in through the chosen provider with a GitHub OIDC token, then runs one headless Claude Code pass (`plan` or `review`) with read-only tools and a JSON schema. |
 | `prompts/plan.md`, `prompts/review.md` | 2, 4 | The agent's instructions for each pass: the rubric for the six questions. |

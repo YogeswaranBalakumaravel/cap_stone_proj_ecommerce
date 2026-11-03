@@ -93,7 +93,13 @@ change?). The code lives in `.qa/agent/` (standard-library Python only; see
 signs in with the job's GitHub OIDC token; `QA_PROVIDER=oauth` uses a Claude seat's
 `claude setup-token` stored as the repo secret `CLAUDE_CODE_OAUTH_TOKEN` (long-lived, so not
 OIDC), passed only to the agent steps and scrubbed from the agent's output. With
-`QA_PROVIDER` unset it runs its scripts-only checks. The workflow loads `.qa/agent/` from the PR's base branch, so
+`QA_PROVIDER` unset it runs its scripts-only checks. Requirements come from the PR: its
+"Acceptance criteria" section plus every Jira ticket it links or names (`.qa/agent/jira_refs.py`,
+shared with the code review agent). The full-project audit (Run workflow) has no PR, so both agents
+require Jira links in a `jira` input and stop without readable tickets. Dependencies install via
+`.qa/agent/install_deps.py` (also used by `ci*.yml` and `pr-tests.yml`), which reads
+`requirements*.txt`/`pyproject.toml`/`setup.py`/`package.json` or the `QA_INSTALL_COMMAND`
+variable, so no workflow needs `requirements.txt`. The workflow loads `.qa/agent/` from the PR's base branch, so
 changes to it take effect only after they merge. It's the mandatory PR gate for
 `main`, `dev` and `staging`: blocking by default (`QA_MODE=advisory` repo variable
 to only comment), and a required status check (**Test quality agent / review**).

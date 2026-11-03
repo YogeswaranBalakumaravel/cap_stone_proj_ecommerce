@@ -22,7 +22,13 @@ on:
     types: [opened, synchronize, reopened, ready_for_review]
   # Actions > Test quality agent > Run workflow: audit the whole project on the chosen branch,
   # as if every file were new. The report goes to the run summary instead of a PR comment.
+  # There's no PR to read requirements from, so the run asks for the Jira tickets that hold them.
   workflow_dispatch:
+    inputs:
+      jira:
+        description: Jira links or keys whose requirements the audit checks (comma or space separated)
+        required: true
+        type: string
 
 permissions: {}   # each job asks for exactly what it needs
 
@@ -101,7 +107,9 @@ jobs:
           PR_TITLE: ${{ github.event.pull_request.title || format('Full-project audit of {0}', github.ref_name) }}
           PR_BODY: ${{ github.event.pull_request.body }}
           HEAD_REF: ${{ github.head_ref || github.ref_name }}
-          # Optional: read acceptance criteria from the Jira key in the branch name or PR title.
+          # Acceptance criteria also come from the Jira tickets the PR links or names (title,
+          # branch, the description's Ticket section); a full audit reads only the `jira` input.
+          QA_JIRA_LINKS: ${{ inputs.jira }}
           JIRA_BASE_URL: ${{ vars.JIRA_BASE_URL }}
           JIRA_EMAIL: ${{ vars.JIRA_EMAIL }}
           JIRA_API_TOKEN: ${{ secrets.JIRA_API_TOKEN }}
@@ -154,10 +162,13 @@ jobs:
         uses: actions/setup-python@v7
         with:
           python-version: "3.12"
-          cache: "pip"
 
       - name: Install dependencies
-        run: pip install -r requirements.txt
+        # Worked out from the repo (requirements*.txt, pyproject.toml, setup.py, package.json),
+        # or the QA_INSTALL_COMMAND repository variable. See install_deps.py.
+        env:
+          QA_INSTALL_COMMAND: ${{ vars.QA_INSTALL_COMMAND }}
+        run: python3 "$QA_HOME/install_deps.py"
 
       - name: Get the plan
         uses: actions/download-artifact@v8
