@@ -10,4 +10,5 @@
 
 ## Ticket
 
-<!-- e.g. PROJ-123. The agent can read the ticket's acceptance criteria if Jira is configured. -->
+<!-- Jira links or keys (e.g. PROJ-123), one or more. Both QA agents read each ticket's
+     acceptance criteria along with the ones above, if Jira is configured. -->

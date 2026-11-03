@@ -15,7 +15,8 @@ The agent doesn't start from the diff. It first builds a picture of the system, 
 then of the change, and only then judges it.
 
 ```
-1. collect.py                 script   The ask: PR description, acceptance criteria (with ids), Jira (v3 / ADF).
+1. collect.py                 script   The ask: PR description, acceptance criteria (with ids), the Jira
+                                       tickets it names (v3 / ADF); an audit's `jira` input instead.
                                        The existing code: routes and endpoints, templates and who renders them,
                                        url_for references, every symbol with its signature, element ids, imports.
                                        The change: files by area (backend / frontend / test), added lines.
@@ -103,7 +104,10 @@ CODEOWNERS on the changed files decides whether it stands.
 5. CODEOWNERS: `/.qa/` and `/.github/workflows/` owned by the QA team.
 6. Write acceptance criteria under an "Acceptance criteria" heading, one per line, ideally with ids
    (`AC-1: ...`). Optionally a `## Scope` section listing path globs. Jira works as in the test
-   agent (`JIRA_BASE_URL`, `JIRA_EMAIL`, secret `JIRA_API_TOKEN`; v3 API, ADF parsed).
+   agent (`JIRA_BASE_URL`, `JIRA_EMAIL`, secret `JIRA_API_TOKEN`; v3 API, ADF parsed): every
+   ticket the PR links or names is read (`.qa/agent/jira_refs.py`), and a ticket's criteria
+   whose id the PR already uses become `KEY/AC-n`. The full-project audit (**Run workflow**) has
+   no PR, so it asks for Jira links in its required `jira` input and stops without readable ones.
 7. Network: the dependency check calls `pypi.org`, `registry.npmjs.org` and `api.osv.dev`. A failed
    lookup is reported as inconclusive (DP000), never as a pass.
 

@@ -29,6 +29,7 @@ import repo_index
 from checks import ALL
 from checks import _ast as pyast
 from cr_common import (
+    CR_HOME,
     CR_OUT,
     REPO,
     SEV_RANK,
@@ -45,6 +46,11 @@ from cr_common import (
     to_ranges,
     write_json,
 )
+
+# Which Jira tickets to read is shared with the test quality agent. Appended, not prepended:
+# .qa/agent has its own gate.py and common.py.
+sys.path.append(str(os.environ.get("QA_AGENT_HOME") or CR_HOME.parent / "agent"))
+import jira_refs  # noqa: E402
 
 BULLET = re.compile(r"^\s*(?:[-*+]|\d+[.)])\s+(?:\[[ xX]\]\s*)?(.*\S)")
 
@@ -141,6 +147,13 @@ def jira(key: str, cfg: dict) -> tuple[str, list[dict]]:
     return "\n\n".join(text_parts), found
 
 
+def add_ticket(crit: list[dict], key: str, found: list[dict]) -> list[dict]:
+    """crit plus a ticket's criteria. Each ticket numbers its own from AC-1, so an id already
+    taken by the PR or an earlier ticket is prefixed with the ticket's key."""
+    used = {c["id"] for c in crit}
+    return crit + [{**c, "id": f"{key}/{c['id']}"} if c["id"] in used else c for c in found]
+
+
 def changed_files(cfg: dict, base: str) -> list[dict]:
     files = []
     churn = {}
@@ -226,12 +239,22 @@ def main() -> int:
                 os.path.relpath(path, REPO),
                 len(crit) + 1,
             )
-    key_rx = re.compile(cfg["requirements"]["jira_key_regex"])
-    key_m = key_rx.search(os.environ.get("HEAD_REF", "")) or key_rx.search(
-        os.environ.get("PR_TITLE", "")
-    )
-    jira_text, jira_crit = jira(key_m.group(0), cfg) if key_m else ("", [])
-    crit += jira_crit
+    key_regex = cfg["requirements"].get("jira_key_regex") or jira_refs.KEY
+    if full_audit():
+        jira_keys = jira_refs.audit_keys(jira_refs.ask(), key_regex)
+    else:
+        jira_keys = jira_refs.pr_keys(
+            os.environ.get("PR_TITLE", ""), body, os.environ.get("HEAD_REF", ""), key_regex
+        )
+    jira_texts, read = [], []
+    for key in jira_keys:
+        text, found = jira(key, cfg)
+        if text:
+            jira_texts.append(f"## {key}\n\n{text}")
+            read.append(key)
+            crit = add_ticket(crit, key, found)
+    if full_audit():
+        jira_refs.require_for_audit(jira_keys, read)
     try:
         labels = json.loads(os.environ.get("PR_LABELS") or "[]")
     except ValueError:
@@ -243,8 +266,8 @@ def main() -> int:
         "author": os.environ.get("PR_AUTHOR", ""),
         "head_ref": os.environ.get("HEAD_REF", ""),
         "labels": labels,
-        "jira_key": key_m.group(0) if key_m else None,
-        "jira_text": jira_text,
+        "jira_keys": jira_keys,
+        "jira_text": "\n\n".join(jira_texts),
         "acceptance_criteria": crit,
         "declared_scope": [
             s.strip("` ") for s in section(body, cfg["requirements"]["scope_heading_regex"])
