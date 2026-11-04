@@ -1,0 +1,69 @@
+{
+ "type": "object",
+ "additionalProperties": false,
+ "required": ["verdict", "summary", "finding_reviews", "adjustments", "extra_skips", "questions", "confidence"],
+ "properties": {
+  "verdict": {"type": "string", "enum": ["not_ready", "ready_after_changes", "ready"]},
+  "summary": {"type": "string"},
+  "finding_reviews": {
+   "type": "array",
+   "items": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["id", "agree", "note"],
+    "properties": {
+     "id": {"type": "string"},
+     "agree": {"type": "boolean"},
+     "note": {"type": "string"}
+    }
+   }
+  },
+  "adjustments": {
+   "type": "array",
+   "items": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["title", "file", "snippet", "why", "resolves", "evidence"],
+    "properties": {
+     "title": {"type": "string"},
+     "file": {"type": "string"},
+     "snippet": {"type": "string"},
+     "why": {"type": "string"},
+     "resolves": {"type": "array", "items": {"type": "string"}},
+     "evidence": {"$ref": "#/definitions/evidence"}
+    }
+   }
+  },
+  "extra_skips": {
+   "type": "array",
+   "items": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["title", "gate", "what_happens", "fix", "evidence"],
+    "properties": {
+     "title": {"type": "string"},
+     "gate": {"type": "string"},
+     "what_happens": {"type": "string"},
+     "fix": {"type": "string"},
+     "evidence": {"$ref": "#/definitions/evidence"}
+    }
+   }
+  },
+  "questions": {"type": "array", "items": {"type": "string"}},
+  "confidence": {"type": "string", "enum": ["low", "medium", "high"]}
+ },
+ "definitions": {
+  "evidence": {
+   "type": "array",
+   "items": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["file", "line"],
+    "properties": {
+     "file": {"type": "string"},
+     "line": {"type": "integer"}
+    }
+   }
+  }
+ }
+}

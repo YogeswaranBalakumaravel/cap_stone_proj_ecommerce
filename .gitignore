@@ -13,3 +13,4 @@ instance/
 htmlcov/
 .qa-out/
 .cr-out/
+.onboard-out/

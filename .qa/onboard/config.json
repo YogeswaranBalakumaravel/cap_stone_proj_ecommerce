@@ -1,0 +1,13 @@
+{
+  "agent": {
+    "provider": "none",
+    "model": "",
+    "use_json_schema": true,
+    "max_turns": 40,
+    "max_budget_usd": 3,
+    "timeout_seconds": 1200
+  },
+  "report": {
+    "max_tail_chars": 2500
+  }
+}

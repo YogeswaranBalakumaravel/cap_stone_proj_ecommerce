@@ -1,0 +1,187 @@
+# Gating onboarding: after the gates are copied into a repository, check that each one will run on
+# every PR it should, and actually check something there. Advisory: it reports, it doesn't block
+# (set the `strict` input to fail on blockers).
+#
+#   tests    install and run the project's tests the way the test quality agent's evidence job
+#            will: runs repo code, so no credentials and no secrets
+#   advise   inventory the repo and its workflows, run the deterministic checks, then the agent
+#            reviews them and proposes exact changes; report as a PR comment and the run summary
+#
+# No branch filter on pull_request on purpose: wrong branch lists are one of the things it finds.
+# See .qa/onboard/README.md.
+name: Gating onboarding
+
+on:
+  pull_request:
+    paths:
+      - ".qa/**"
+      - ".github/workflows/**"
+      - ".github/CODEOWNERS"
+      - "CODEOWNERS"
+      - ".github/pull_request_template.md"
+  workflow_dispatch:
+    inputs:
+      run_tests:
+        description: Install and run the tests as the gates will (recommended)
+        type: boolean
+        default: true
+      strict:
+        description: Fail the run when a gate would be skipped
+        type: boolean
+        default: false
+
+permissions: {}
+
+concurrency:
+  group: gating-onboarding-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  OB_OUT: .onboard-out
+  QA_PROVIDER: ${{ vars.QA_PROVIDER }}
+  QA_MODEL: ${{ vars.QA_MODEL }}
+  CLAUDE_CODE_VERSION: latest   # pin an exact version for reproducible runs
+
+jobs:
+  tests:
+    if: >-
+      github.event_name == 'workflow_dispatch' && inputs.run_tests ||
+      github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read           # no id-token and no secrets: this job runs the repository's code
+    steps:
+      - name: Check out
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"   # the evidence job's version; a mismatch is reported (OB032)
+
+      - name: Install and run the tests as the evidence job will
+        env:
+          QA_INSTALL_COMMAND: ${{ vars.QA_INSTALL_COMMAND }}
+        run: python3 .qa/onboard/onboard.py tests
+
+      - name: Hand over to the advise job
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: onboarding-tests
+          path: .onboard-out/
+          include-hidden-files: true
+          retention-days: 1
+          if-no-files-found: ignore
+
+  advise:
+    needs: tests
+    if: >-
+      !cancelled() && (github.event_name == 'workflow_dispatch' ||
+      github.event.pull_request.head.repo.full_name == github.repository)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      pull-requests: write     # the PR comment
+      id-token: write          # short-lived OIDC token for the agent; nothing is stored
+    env:
+      ANTHROPIC_FEDERATION_RULE_ID: ${{ vars.ANTHROPIC_FEDERATION_RULE_ID }}
+      ANTHROPIC_ORGANIZATION_ID: ${{ vars.ANTHROPIC_ORGANIZATION_ID }}
+      ANTHROPIC_SERVICE_ACCOUNT_ID: ${{ vars.ANTHROPIC_SERVICE_ACCOUNT_ID }}
+      ANTHROPIC_WORKSPACE_ID: ${{ vars.ANTHROPIC_WORKSPACE_ID }}
+      AWS_ROLE_ARN: ${{ vars.AWS_ROLE_ARN }}
+      AWS_REGION: ${{ vars.AWS_REGION }}
+      ANTHROPIC_VERTEX_PROJECT_ID: ${{ vars.ANTHROPIC_VERTEX_PROJECT_ID }}
+      CLOUD_ML_REGION: ${{ vars.CLOUD_ML_REGION }}
+      GCP_WORKLOAD_IDENTITY_PROVIDER: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+      GCP_SERVICE_ACCOUNT: ${{ vars.GCP_SERVICE_ACCOUNT }}
+      ANTHROPIC_FOUNDRY_RESOURCE: ${{ vars.ANTHROPIC_FOUNDRY_RESOURCE }}
+      AZURE_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
+      AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+    steps:
+      - name: Check out
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0           # every branch, to compare with the gates' branch lists
+          persist-credentials: false
+
+      - name: Load the onboarding agent from the base branch
+        # Like the gates: the base branch's copy if it has one, so a PR can't soften the advice.
+        # On the PR that first adds the gating there's no base copy yet, so the PR's is used.
+        env:
+          BASE_REF: ${{ github.base_ref || github.ref_name }}
+        run: |
+          OB_ROOT="$RUNNER_TEMP/ob"
+          mkdir -p "$OB_ROOT"
+          if git cat-file -e "origin/$BASE_REF:.qa/onboard/onboard.py" 2>/dev/null; then
+            git archive "origin/$BASE_REF" .qa/onboard .qa/agent | tar -x -C "$OB_ROOT"
+          else
+            mkdir -p "$OB_ROOT/.qa" && cp -R .qa/onboard .qa/agent "$OB_ROOT/.qa/"
+          fi
+          echo "OB_HOME=$OB_ROOT/.qa/onboard" >> "$GITHUB_ENV"
+          echo "QA_AGENT_HOME=$OB_ROOT/.qa/agent" >> "$GITHUB_ENV"
+
+      - name: Get the test run
+        continue-on-error: true
+        uses: actions/download-artifact@v8
+        with:
+          name: onboarding-tests
+          path: .onboard-out
+
+      - name: Install Claude Code
+        if: env.QA_PROVIDER != '' && env.QA_PROVIDER != 'none'
+        run: npm install -g "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}"
+
+      - name: 1. Inventory the repo and check the gates
+        env:
+          GH_TOKEN: ${{ github.token }}     # reads rulesets for required checks; never runs repo code
+          OB_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          OB_REPO_PRIVATE: ${{ github.event.repository.private }}
+          JIRA_BASE_URL: ${{ vars.JIRA_BASE_URL }}
+        run: python3 "$OB_HOME/onboard.py" inspect
+
+      - name: 2. Agent reviews the findings and proposes changes
+        continue-on-error: true
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ vars.QA_PROVIDER == 'oauth' && secrets.CLAUDE_CODE_OAUTH_TOKEN || '' }}
+        run: python3 "$OB_HOME/onboard.py" advise
+
+      - name: 3. Report
+        id: report
+        env:
+          OB_STRICT: ${{ inputs.strict && '1' || '' }}
+        run: python3 "$OB_HOME/onboard.py" report
+
+      - name: Post the report
+        if: always() && github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          [ -f .onboard-out/report.md ] || { echo "No report to post."; exit 0; }
+          marker='<!-- gating-onboarding -->'
+          id=$(gh api "repos/$GH_REPO/issues/$PR_NUMBER/comments" --paginate \
+                 --jq ".[] | select(.user.login == \"github-actions[bot]\") |
+                       select(.body | startswith(\"$marker\")) | .id" | head -n 1)
+          if [ -n "$id" ]; then
+            gh api -X PATCH "repos/$GH_REPO/issues/comments/$id" -F body=@.onboard-out/report.md > /dev/null
+          else
+            gh pr comment "$PR_NUMBER" --body-file .onboard-out/report.md
+          fi
+
+      - name: Keep the report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: gating-onboarding-report
+          path: .onboard-out/
+          include-hidden-files: true
+          retention-days: 30
+          overwrite: true

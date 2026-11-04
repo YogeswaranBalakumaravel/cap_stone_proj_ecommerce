@@ -116,6 +116,15 @@ judgement calls wait for a reviewer (not the author) to approve with `attest: <c
 `CODE_REVIEW_MODE=advisory` makes it comment-only. Its job is `code-review`, not `review`, so it
 doesn't share a required-check name with the test quality agent.
 
+`.github/workflows/gating-onboarding.yml`: when the gating is copied into a repository (any PR
+touching `.qa/` or the workflows, or Run workflow), checks that every gate will run on every PR it
+should and actually check something there: branch lists vs the repo's long-lived branches, test
+command and globs vs the detected stack, the tests installed and run as the evidence job will (no
+credentials), commenter workflow names, CODEOWNERS, PR template, required checks. Deterministic
+checks (`OB0xx`) plus an agent pass that proposes exact edits; one report as a PR comment.
+Advisory unless `strict`. No branch filter on purpose. Code in `.qa/onboard/` (standard library
+only; see `.qa/onboard/README.md`); it judges the config in the checkout, not the base branch's.
+
 `.github/workflows/gate-findings-commenter.yml`: on `workflow_run` completion of any gate workflow
 above (CI, CI - Dev, CI - UAT, PR Test Gate, Gitleaks, both agents) for a PR, it keeps one PR comment
 (`<!-- gate-findings-commenter -->`) listing every gate's findings for the head commit, read from
