@@ -4,7 +4,8 @@
 Writes .qa-out/context.json (read by the scripts) and .qa-out/context.md (read by the agent).
 
 Environment (all optional): PR_NUMBER, PR_TITLE, PR_BODY, HEAD_REF, QA_BASE_REF,
-JIRA_BASE_URL, JIRA_EMAIL, JIRA_API_TOKEN.
+JIRA_BASE_URL, JIRA_EMAIL, JIRA_API_TOKEN. A full-project audit needs QA_JIRA_LINKS (see
+jira_refs.py) and stops without it.
 """
 
 from __future__ import annotations
@@ -19,6 +20,7 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 
+import jira_refs
 from common import (
     QA_OUT,
     REPO,
@@ -161,7 +163,7 @@ def fence(text: str, lang: str = "") -> str:
     return f"{bar}{lang}\n{text.rstrip()}\n{bar}"
 
 
-def render_markdown(ctx: dict, body: str, jira_text: str, req_files, diff: str) -> str:
+def render_markdown(ctx: dict, body: str, jira_texts, req_files, diff: str) -> str:
     out = [
         "# Pull request context",
         "",
@@ -195,8 +197,8 @@ def render_markdown(ctx: dict, body: str, jira_text: str, req_files, diff: str) 
             "",
         ]
     out += ["### PR description", "", fence(body[:MAX_BODY_CHARS] or "(empty)"), ""]
-    if jira_text:
-        out += [f"### Jira {ctx['jira_key']}", "", fence(jira_text), ""]
+    for key, text in jira_texts:
+        out += [f"### Jira {key}", "", fence(text), ""]
     for rel, text in req_files:
         out += [f"### Requirement file `{rel}`", "", fence(text), ""]
     out += [
@@ -260,12 +262,14 @@ def main() -> None:
         rf"^\s*(?:#+\s*|\*\*\s*)?(?:{req.get('ac_heading_regex') or 'acceptance criteria'})\b",
         re.I | re.M,
     )
-    key_match = None
-    if req.get("jira_key_regex"):
-        key_re = re.compile(req["jira_key_regex"])
-        key_match = key_re.search(head_ref or "") or key_re.search(title)
-    jira_key = key_match.group(0) if key_match else ""
-    jira_text = fetch_jira(jira_key, cfg) if jira_key else ""
+    key_regex = req.get("jira_key_regex") or jira_refs.KEY
+    if full_audit():
+        jira_keys = jira_refs.audit_keys(jira_refs.ask(), key_regex)
+    else:
+        jira_keys = jira_refs.pr_keys(title, body, head_ref, key_regex)
+    jira_texts = [(k, t) for k in jira_keys if (t := fetch_jira(k, cfg))]
+    if full_audit():
+        jira_refs.require_for_audit(jira_keys, [k for k, _ in jira_texts])
     req_files = requirement_files(cfg)
 
     ctx = {
@@ -277,13 +281,13 @@ def main() -> None:
         "pr_number": os.environ.get("PR_NUMBER", ""),
         "pr_title": title,
         "test_command": cfg["tests"]["command"],
-        "jira_key": jira_key,
-        "acceptance_criteria_found": bool(heading.search(body) or jira_text or req_files),
+        "jira_keys": jira_keys,
+        "acceptance_criteria_found": bool(heading.search(body) or jira_texts or req_files),
         "acceptance_criteria_sources": [
             s
             for s, ok in (
                 ("pr_description", bool(heading.search(body))),
-                ("jira", bool(jira_text)),
+                ("jira", bool(jira_texts)),
                 ("requirement_files", bool(req_files)),
             )
             if ok
@@ -294,7 +298,7 @@ def main() -> None:
     }
     write_json(QA_OUT / "context.json", ctx)
     (QA_OUT / "context.md").write_text(
-        render_markdown(ctx, body, jira_text, req_files, diff), encoding="utf-8"
+        render_markdown(ctx, body, jira_texts, req_files, diff), encoding="utf-8"
     )
 
     counts = {}

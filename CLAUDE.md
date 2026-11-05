@@ -93,7 +93,13 @@ change?). The code lives in `.qa/agent/` (standard-library Python only; see
 signs in with the job's GitHub OIDC token; `QA_PROVIDER=oauth` uses a Claude seat's
 `claude setup-token` stored as the repo secret `CLAUDE_CODE_OAUTH_TOKEN` (long-lived, so not
 OIDC), passed only to the agent steps and scrubbed from the agent's output. With
-`QA_PROVIDER` unset it runs its scripts-only checks. The workflow loads `.qa/agent/` from the PR's base branch, so
+`QA_PROVIDER` unset it runs its scripts-only checks. Requirements come from the PR: its
+"Acceptance criteria" section plus every Jira ticket it links or names (`.qa/agent/jira_refs.py`,
+shared with the code review agent). The full-project audit (Run workflow) has no PR, so both agents
+require Jira links in a `jira` input and stop without readable tickets. Dependencies install via
+`.qa/agent/install_deps.py` (also used by `ci*.yml` and `pr-tests.yml`), which reads
+`requirements*.txt`/`pyproject.toml`/`setup.py`/`package.json` or the `QA_INSTALL_COMMAND`
+variable, so no workflow needs `requirements.txt`. The workflow loads `.qa/agent/` from the PR's base branch, so
 changes to it take effect only after they merge. It's the mandatory PR gate for
 `main`, `dev` and `staging`: blocking by default (`QA_MODE=advisory` repo variable
 to only comment), and a required status check (**Test quality agent / review**).
@@ -109,6 +115,15 @@ run and can still block. It loads from the PR's base branch too. Only lines the 
 judgement calls wait for a reviewer (not the author) to approve with `attest: <check>`.
 `CODE_REVIEW_MODE=advisory` makes it comment-only. Its job is `code-review`, not `review`, so it
 doesn't share a required-check name with the test quality agent.
+
+`.github/workflows/gating-onboarding.yml`: when the gating is copied into a repository (any PR
+touching `.qa/` or the workflows, or Run workflow), checks that every gate will run on every PR it
+should and actually check something there: branch lists vs the repo's long-lived branches, test
+command and globs vs the detected stack, the tests installed and run as the evidence job will (no
+credentials), commenter workflow names, CODEOWNERS, PR template, required checks. Deterministic
+checks (`OB0xx`) plus an agent pass that proposes exact edits; one report as a PR comment.
+Advisory unless `strict`. No branch filter on purpose. Code in `.qa/onboard/` (standard library
+only; see `.qa/onboard/README.md`); it judges the config in the checkout, not the base branch's.
 
 `.github/workflows/gate-findings-commenter.yml`: on `workflow_run` completion of any gate workflow
 above (CI, CI - Dev, CI - UAT, PR Test Gate, Gitleaks, both agents) for a PR, it keeps one PR comment
